@@ -1,0 +1,10 @@
+work/
+*.idsig
+*.p12
+password.txt
+*.keystore
+*.jks
+local.properties
+secrets.properties
+.gradle/
+build/
