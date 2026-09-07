@@ -6,15 +6,15 @@
 })(typeof window !== 'undefined' ? window : null, function () {
   'use strict';
   var STORAGE_KEY = 'medtime.alarms.v1';
-  var slots = ['morning','noon','evening'];
+  var slots = ['morning','noon','evening','bedtime'];
   function defaults() {
-    return {version:1,morning:{enabled:false,time:'08:00'},noon:{enabled:false,time:'12:30'},evening:{enabled:false,time:'20:00'}};
+    return {version:2,morning:{enabled:false,time:'08:00'},noon:{enabled:false,time:'12:30'},evening:{enabled:false,time:'20:00'},bedtime:{enabled:false,time:'22:00'}};
   }
   function validate(value) {
-    if (!value || value.version !== 1 || Object.keys(value).sort().join('|') !== 'evening|morning|noon|version') throw new Error('闹钟设置格式不正确');
-    var clean = {version:1};
+    if (!value || ![1,2].includes(value.version) || Object.keys(value).sort().join('|') !== (value.version === 1 ? 'evening|morning|noon|version' : 'bedtime|evening|morning|noon|version')) throw new Error('闹钟设置格式不正确');
+    var clean = {version:2};
     slots.forEach(function (slot) {
-      var alarm = value[slot];
+      var alarm = slot === 'bedtime' && value.version === 1 ? {enabled:false,time:'22:00'} : value[slot];
       if (!alarm || Object.keys(alarm).sort().join('|') !== 'enabled|time' || typeof alarm.enabled !== 'boolean' ||
           typeof alarm.time !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(alarm.time)) throw new Error('请选择有效的闹钟时间');
       clean[slot] = {enabled:alarm.enabled,time:alarm.time};
@@ -44,8 +44,8 @@
     // completions, never notes or a full backup. Keep UTC instants for zone changes.
     var cutoff = new Date(now === undefined ? Date.now() : now).getTime() - 48*60*60*1000;
     if (!Number.isFinite(cutoff)) throw new Error('设备时间无效');
-    return {version:1,alarms:validate(alarms),medications:data.medications.map(function (med) {
-      return {id:med.id,name:med.name,schedule:JSON.parse(JSON.stringify(med.schedule))};
+    return {version:2,alarms:validate(alarms),medications:data.medications.map(function (med) {
+      return {id:med.id,name:med.name,status:med.status,schedule:JSON.parse(JSON.stringify(med.schedule))};
     }),records:data.records.filter(function (record) {
       return slots.indexOf(record.slot) >= 0 && new Date(record.takenAt).getTime() >= cutoff;
     }).map(function (record) { return {medicationId:record.medicationId,slot:record.slot,takenAt:record.takenAt}; })};

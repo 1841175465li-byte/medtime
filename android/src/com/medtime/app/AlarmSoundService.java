@@ -25,12 +25,15 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 
 /** A user-visible alarm, bounded to 60 seconds, with a notification stop action. */
 public final class AlarmSoundService extends Service {
     private static volatile AlarmSoundService running;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final Map<String,Long> active=new LinkedHashMap<>();
+    private volatile Map<String,Long> occurrenceSnapshot=Collections.emptyMap();
     private final Runnable stopTask=this::stopSelf;
     private MediaPlayer player;
     private Vibrator vibrator;
@@ -39,7 +42,17 @@ public final class AlarmSoundService extends Service {
     private AudioFocusRequest focus;
     private volatile long deadline;
     private boolean sounding;
+    private boolean proofTest;
     static boolean isRinging() { AlarmSoundService service=running; return service != null && SystemClock.elapsedRealtime() < service.deadline; }
+    static Map<String,Long> activeOccurrences() {
+        AlarmSoundService service=running;
+        return service!=null && isRinging()?service.occurrenceSnapshot:Collections.emptyMap();
+    }
+    private static String slotOf(String key) { return key.split("\\|",2)[0]; }
+    private void publishOccurrences() {
+        Map<String,Long> snapshot=new LinkedHashMap<>(active); snapshot.remove("test");
+        occurrenceSnapshot=Collections.unmodifiableMap(snapshot);
+    }
     static void refresh() {
         AlarmSoundService service=running;
         if (service != null) service.handler.post(service::refreshActive);
@@ -56,35 +69,54 @@ public final class AlarmSoundService extends Service {
         boolean test=intent.getBooleanExtra("test",false);
         String slot=test ? "test" : intent.getStringExtra("slot");
         if (!test && AlarmPlan.index(slot) < 0) { stopSelf(); return START_NOT_STICKY; }
-        active.put(slot,intent.getLongExtra("at",System.currentTimeMillis()));
+        if (test && !occurrenceSnapshot.isEmpty()) {
+            if (intent.getBooleanExtra("proofTest",false)) AlarmScheduler.prefs(this).edit().putString("test.result","interrupted").apply();
+            AlarmReceiver.releaseHandoff(); return START_NOT_STICKY;
+        }
+        if (!test && active.remove("test")!=null) {
+            if (proofTest) AlarmScheduler.prefs(this).edit().putString("test.result","interrupted").apply();
+            proofTest=false;
+        }
+        if (test) proofTest=intent.getBooleanExtra("proofTest",false);
+        long origin=intent.getLongExtra("at",System.currentTimeMillis());
+        active.put(test?"test":slot+"|"+origin,origin);
+        publishOccurrences();
         long duration=test && active.size()==1 ? 5000 : 60000;
         deadline=SystemClock.elapsedRealtime()+duration;
         Notification notification=notification();
-        if (Build.VERSION.SDK_INT >= 29) startForeground(AlarmScheduler.NOTIFICATION_ID,notification,ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-        else startForeground(AlarmScheduler.NOTIFICATION_ID,notification);
+        try {
+            if (Build.VERSION.SDK_INT >= 29) startForeground(AlarmScheduler.NOTIFICATION_ID,notification,ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            else startForeground(AlarmScheduler.NOTIFICATION_ID,notification);
+        } catch (Exception error) {
+            AlarmScheduler.prefs(this).edit().putString("error","系统阻止了响铃服务，请检查后台设置并重新测试").apply();
+            stopSelf(); return START_NOT_STICKY;
+        }
         if (wake.isHeld()) wake.release();
         wake.acquire(duration+5000);
         AlarmReceiver.releaseHandoff();
         handler.removeCallbacks(stopTask); handler.postDelayed(stopTask,duration);
-        if (!sounding) startSound();
+        if (!sounding) { try { startSound(); } catch (Exception error) { reportSoundFailure(); } }
         refreshActive();
         return START_NOT_STICKY;
     }
     private Notification notification() {
         StringBuilder labels=new StringBuilder();
-        for (String slot:active.keySet()) { if (labels.length()>0) labels.append("、"); labels.append(AlarmScheduler.label(slot)); }
+        Set<String> slots=new LinkedHashSet<>(); for (String key:active.keySet()) slots.add(slotOf(key));
+        for (String slot:slots) { if (labels.length()>0) labels.append("、"); labels.append(AlarmScheduler.label(slot)); }
         PendingIntent stop=PendingIntent.getBroadcast(this,601,new Intent(this,AlarmReceiver.class).setAction(AlarmScheduler.STOP),PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent snooze=PendingIntent.getBroadcast(this,602,new Intent(this,AlarmReceiver.class).setAction(AlarmScheduler.SNOOZE),PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification publicVersion=new Notification.Builder(this,AlarmScheduler.CHANNEL).setSmallIcon(R.drawable.ic_alarm)
             .setContentTitle("药记 · 用药闹钟").setContentText("点击查看或停止响铃").build();
-        return new Notification.Builder(this,AlarmScheduler.CHANNEL).setSmallIcon(R.drawable.ic_alarm)
+        Notification.Builder builder=new Notification.Builder(this,AlarmScheduler.CHANNEL).setSmallIcon(R.drawable.ic_alarm)
             .setContentTitle(labels + "用药闹钟")
             .setContentText(active.containsKey("test") && active.size()==1 ? "测试响铃，约 5 秒后停止" : "查看今日安排，用药后再记录；响铃最多 1 分钟")
             .setCategory(Notification.CATEGORY_ALARM).setVisibility(Notification.VISIBILITY_PRIVATE)
             .setPublicVersion(publicVersion).setOngoing(true).setOnlyAlertOnce(true)
             .setContentIntent(AlarmScheduler.openIntent(this,600))
             .setDeleteIntent(stop)
-            .addAction(new Notification.Action.Builder(null,"停止响铃",stop).build())
-            .addAction(new Notification.Action.Builder(null,"打开药记",AlarmScheduler.openIntent(this,600)).build()).build();
+            .addAction(new Notification.Action.Builder(null,"停止响铃",stop).build());
+        if (!occurrenceSnapshot.isEmpty()) builder.addAction(new Notification.Action.Builder(null,"稍后 10 分钟",snooze).build());
+        return builder.addAction(new Notification.Action.Builder(null,"打开药记",AlarmScheduler.openIntent(this,600)).build()).build();
     }
     private void startSound() {
         sounding=true;
@@ -101,6 +133,7 @@ public final class AlarmSoundService extends Service {
                 player.setOnPreparedListener(ready -> {
                     if (running == this && isRinging()) {
                         ready.start(); AlarmScheduler.prefs(this).edit().remove("audioError").apply();
+                        if (proofTest) AlarmScheduler.prefs(this).edit().putLong("test.audio",System.currentTimeMillis()).apply();
                     }
                 });
                 player.setOnErrorListener((failed,what,extra) -> { reportSoundFailure(); return true; });
@@ -125,14 +158,16 @@ public final class AlarmSoundService extends Service {
             while (iterator.hasNext()) {
                 Map.Entry<String,Long> entry=iterator.next();
                 if ("test".equals(entry.getKey())) continue;
-                if (AlarmPlan.pending(entry.getKey(),snapshot.alarms.get(entry.getKey()),snapshot.meds,done,entry.getValue(),zone).isEmpty()) iterator.remove();
+                String slot=slotOf(entry.getKey());
+                if (AlarmPlan.pending(slot,snapshot.alarms.get(slot),snapshot.meds,done,entry.getValue(),zone).isEmpty()) iterator.remove();
             }
+            publishOccurrences();
             if (active.isEmpty()) stopSelf();
             else getSystemService(NotificationManager.class).notify(AlarmScheduler.NOTIFICATION_ID,notification());
         } catch (Exception error) { stopSelf(); }
     }
     @Override public void onDestroy() {
-        running=null; deadline=0; handler.removeCallbacksAndMessages(null);
+        running=null; deadline=0; occurrenceSnapshot=Collections.emptyMap(); handler.removeCallbacksAndMessages(null);
         if (player != null) { player.release(); player=null; }
         if (vibrator != null) vibrator.cancel();
         if (audio != null && focus != null) audio.abandonAudioFocusRequest(focus);

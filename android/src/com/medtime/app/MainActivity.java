@@ -176,6 +176,10 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void suspendAlarms() { AlarmScheduler.suspend(MainActivity.this,"请先修复或重新保存闹钟设置"); }
         @JavascriptInterface public void stopAlarm() { AlarmScheduler.stop(MainActivity.this); runOnUiThread(MainActivity.this::reportAlarmStatus); }
         @JavascriptInterface public String testAlarm() { return AlarmScheduler.test(MainActivity.this).toString(); }
+        @JavascriptInterface public String scheduleAlarmTest() { return AlarmScheduler.scheduleTest(MainActivity.this).toString(); }
+        @JavascriptInterface public void cancelAlarmTest() { AlarmScheduler.cancelTest(MainActivity.this); runOnUiThread(MainActivity.this::reportAlarmStatus); }
+        @JavascriptInterface public String confirmAlarmTest(boolean heard) { return AlarmScheduler.confirmTest(MainActivity.this,heard).toString(); }
+        @JavascriptInterface public String snoozeAlarm() { return AlarmScheduler.snooze(MainActivity.this).toString(); }
         @JavascriptInterface public void requestAlarmAccess(String kind) { runOnUiThread(() -> requestAlarmAccessOnUi(kind)); }
         @JavascriptInterface public void saveFile(String text, String filename, String mime) {
             if (text == null || text.length() > MAX_BACKUP_BYTES) {
@@ -220,6 +224,10 @@ public final class MainActivity extends Activity {
                 if (Build.VERSION.SDK_INT >= 31 && !AlarmScheduler.exactAllowed(this)) {
                     startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,Uri.parse("package:"+getPackageName())));
                 }
+            } else if ("sound".equals(kind)) {
+                startActivity(new Intent(Settings.ACTION_SOUND_SETTINGS));
+            } else if ("app".equals(kind)) {
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName())));
             } else if ("notifications".equals(kind)) {
                 boolean asked=AlarmScheduler.prefs(this).getBoolean("askedNotifications",false);
                 if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED

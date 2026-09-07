@@ -13,8 +13,8 @@
   var MAX_JSON_LENGTH = 32 * 1024 * 1024;
   var MAX_STORAGE_LENGTH = 5 * 1024 * 1024;
   var ICONS = ['pill', 'capsule', 'tablet'];
-  var SLOTS = ['morning', 'noon', 'evening'];
-  var SLOT_LABELS = { morning: '早', noon: '中', evening: '晚' };
+  var SLOTS = ['morning', 'noon', 'evening', 'bedtime'];
+  var SLOT_LABELS = { morning: '早', noon: '中', evening: '晚', bedtime: '睡前' };
   var DOSE_UNITS = Object.freeze(['粒', '片', 'mL', '滴', '喷', '袋', '支', 'g', 'mg']);
 
   function fail(message) { throw new Error(message); }
@@ -22,17 +22,13 @@
   function defaultSchedule() {
     // Inactive plans have a stable neutral date, so unsaved v1 migrations and
     // first-run defaults do not appear changed to another reader at midnight.
-    return { mode: 'none', slots: [], intervalDays: 2, startDate: '1970-01-01', weekdays: [] };
+    return { mode: 'none', slots: [], intervalDays: 2, startDate: '1970-01-01', weekdays: [], endDate: null, times: {} };
   }
 
   function defaults() {
     return {
-      version: 3,
-      medications: [
-        { id: 'minoxidil', name: '米诺地尔', icon: 'pill', schedule: defaultSchedule(), dose: null },
-        { id: 'isotretinoin', name: '异维A酸软胶囊', icon: 'capsule', schedule: defaultSchedule(), dose: null },
-        { id: 'finasteride', name: '非那雄胺', icon: 'tablet', schedule: defaultSchedule(), dose: null }
-      ],
+      version: 4,
+      medications: [],
       records: []
     };
   }
@@ -65,6 +61,16 @@
 
   function noteText(value) {
     if (typeof value !== 'string' || value.length > 500) fail('备注最多 500 个字');
+    return value;
+  }
+
+  function detailText(value, label) {
+    if (typeof value !== 'string' || value.trim().length > 80 || /[\x00-\x1f<>]/.test(value)) fail(label + '需为 0–80 个字');
+    return value.trim();
+  }
+
+  function medicationStatus(value) {
+    if (['active', 'paused', 'archived'].indexOf(value) < 0) fail('药品状态不正确');
     return value;
   }
 
@@ -124,10 +130,12 @@
     return value;
   }
 
-  function validateSchedule(schedule) {
-    object(schedule, '服药频率', ['mode', 'slots', 'intervalDays', 'startDate', 'weekdays']);
+  function validateSchedule(schedule, requireExtended) {
+    var extended = requireExtended || (schedule && (Object.prototype.hasOwnProperty.call(schedule, 'endDate') || Object.prototype.hasOwnProperty.call(schedule, 'times')));
+    var fields = ['mode', 'slots', 'intervalDays', 'startDate', 'weekdays'];
+    object(schedule, '服药频率', extended ? fields.concat(['endDate', 'times']) : fields);
     if (['none', 'daily', 'interval', 'weekly'].indexOf(schedule.mode) < 0) fail('服药频率类型不正确');
-    if (!Array.isArray(schedule.slots) || schedule.slots.length > 3) fail('请选择有效用药时段');
+    if (!Array.isArray(schedule.slots) || schedule.slots.length > SLOTS.length) fail('请选择有效用药时段');
     var chosenSlots = new Set();
     schedule.slots.forEach(function (slot) {
       if (SLOTS.indexOf(slot) < 0) fail('用药时段不正确');
@@ -150,13 +158,25 @@
     if (chosenDays.size !== schedule.weekdays.length) fail('星期不正确');
     if (schedule.mode === 'weekly' && schedule.weekdays.length === 0) fail('请至少选择一个星期');
     var startDate = calendarDay(schedule.startDate);
+    var endDate = extended && schedule.endDate !== null ? calendarDay(schedule.endDate) : null;
+    if (endDate && endDate < startDate) fail('结束日期不能早于开始日期');
+    var times = {};
+    if (extended) {
+      if (!schedule.times || typeof schedule.times !== 'object' || Array.isArray(schedule.times) || Object.getPrototypeOf(schedule.times) !== Object.prototype) fail('独立时间格式不正确');
+      Object.keys(schedule.times).forEach(function (slot) {
+        if (!chosenSlots.has(slot) || typeof schedule.times[slot] !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(schedule.times[slot])) fail('请选择有效的独立提醒时间');
+        times[slot] = schedule.times[slot];
+      });
+    }
     if (schedule.mode === 'none') return defaultSchedule();
     return {
       mode: schedule.mode,
       slots: SLOTS.filter(function (slot) { return chosenSlots.has(slot); }),
       intervalDays: schedule.intervalDays,
       startDate: startDate,
-      weekdays: schedule.weekdays.slice().sort(function (a, b) { return a - b; })
+      weekdays: schedule.weekdays.slice().sort(function (a, b) { return a - b; }),
+      endDate: endDate,
+      times: times
     };
   }
 
@@ -187,18 +207,21 @@
     // imported doses or a newly entered dose time are checked against "now".
     var clock = futureTakenAtClock === undefined ? null : asDate(futureTakenAtClock);
     object(data, '数据', ['version', 'medications', 'records']);
-    if ([1, 2, 3].indexOf(data.version) < 0) fail('不支持此备份版本');
+    if ([1, 2, 3, 4].indexOf(data.version) < 0) fail('不支持此备份版本');
     var legacy = data.version === 1;
-    var hasDoses = data.version === 3;
-    if (!Array.isArray(data.medications) || data.medications.length < 1 || data.medications.length > MAX_MEDICATIONS) {
-      fail('药品列表需包含 1–100 种药品');
+    var hasDoses = data.version >= 3;
+    var extended = data.version >= 4;
+    if (!Array.isArray(data.medications) || data.medications.length > MAX_MEDICATIONS) {
+      fail('药品列表最多包含 100 种药品');
     }
     if (!Array.isArray(data.records) || data.records.length > MAX_RECORDS) fail('记录数量最多 20,000 条');
     var medicationIds = new Set();
     var recordIds = new Set();
     var medications = data.medications.map(function (medication) {
       var fields = legacy ? ['id', 'name', 'icon'] : ['id', 'name', 'icon', 'schedule'];
-      object(medication, '药品', hasDoses ? fields.concat('dose') : fields);
+      if (hasDoses) fields.push('dose');
+      if (extended) fields.push('strength', 'form', 'status');
+      object(medication, '药品', fields);
       var id = identifier(medication.id, '药品');
       if (medicationIds.has(id)) fail('药品标识重复');
       medicationIds.add(id);
@@ -207,14 +230,18 @@
         id: id,
         name: medicationName(medication.name),
         icon: medication.icon,
-        schedule: legacy ? defaultSchedule() : validateSchedule(medication.schedule),
-        dose: hasDoses ? validateDose(medication.dose) : null
+        schedule: legacy ? defaultSchedule() : validateSchedule(medication.schedule, extended),
+        dose: hasDoses ? validateDose(medication.dose) : null,
+        strength: extended ? detailText(medication.strength, '规格') : '',
+        form: extended ? detailText(medication.form, '剂型') : '',
+        status: extended ? medicationStatus(medication.status) : 'active'
       };
     });
     var records = data.records.map(function (record) {
       var fields = ['id', 'medicationId', 'medicationName', 'takenAt', 'createdAt', 'note'];
       if (!legacy) fields.push('slot');
       if (hasDoses) fields.push('dose');
+      if (extended) fields.push('medicationStrength', 'medicationForm');
       object(record, '记录', fields);
       var id = identifier(record.id, '记录');
       if (recordIds.has(id)) fail('记录标识重复');
@@ -229,10 +256,12 @@
         createdAt: isoDate(record.createdAt, null, '创建时间'),
         note: noteText(record.note),
         slot: legacy ? null : recordSlot(record.slot),
-        dose: hasDoses ? validateDose(record.dose) : null
+        dose: hasDoses ? validateDose(record.dose) : null,
+        medicationStrength: extended ? detailText(record.medicationStrength, '记录规格') : '',
+        medicationForm: extended ? detailText(record.medicationForm, '记录剂型') : ''
       };
     });
-    return { version: 3, medications: medications, records: records };
+    return { version: 4, medications: medications, records: records };
   }
 
   function storageOrDefault(storage) {
@@ -292,6 +321,8 @@
     return {
       medicationId: medication.id,
       medicationName: medication.name,
+      medicationStrength: medication.strength,
+      medicationForm: medication.form,
       takenAt: takenAt,
       note: noteText(input.note === undefined ? '' : input.note).trim(),
       slot: recordSlot(input.slot === undefined ? (original ? original.slot : null) : input.slot),
@@ -308,6 +339,8 @@
       id: uniqueId('record', clean.records),
       medicationId: fields.medicationId,
       medicationName: fields.medicationName,
+      medicationStrength: fields.medicationStrength,
+      medicationForm: fields.medicationForm,
       takenAt: fields.takenAt,
       createdAt: clock.toISOString(),
       note: fields.note,
@@ -336,6 +369,8 @@
       medicationId: fields.medicationId,
       // Editing time or note does not rewrite the historical name after a rename.
       medicationName: fields.medicationId === original.medicationId ? original.medicationName : fields.medicationName,
+      medicationStrength: fields.medicationId === original.medicationId ? original.medicationStrength : fields.medicationStrength,
+      medicationForm: fields.medicationId === original.medicationId ? original.medicationForm : fields.medicationForm,
       takenAt: fields.takenAt,
       createdAt: original.createdAt,
       note: fields.note,
@@ -345,18 +380,20 @@
     return clean;
   }
 
-  function checkDuplicateName(medications, name, exceptId) {
-    if (medications.some(function (item) { return item.id !== exceptId && item.name.toLocaleLowerCase() === name.toLocaleLowerCase(); })) {
-      fail('已有同名药品');
+  function checkDuplicateName(medications, name, exceptId, strength, form) {
+    if (medications.some(function (item) { return item.id !== exceptId && item.name.toLocaleLowerCase() === name.toLocaleLowerCase() && item.strength === (strength || '') && item.form === (form || ''); })) {
+      fail('已有同名、同规格和同剂型的药品，请在药品列表中管理');
     }
   }
 
-  function addMedication(data, name) {
+  function addMedication(data, name, details) {
     var clean = validate(data);
     var normalized = medicationName(name);
     if (clean.medications.length >= MAX_MEDICATIONS) fail('最多添加 100 种药品');
-    checkDuplicateName(clean.medications, normalized);
-    clean.medications.push({ id: uniqueId('medication', clean.medications), name: normalized, icon: 'pill', schedule: defaultSchedule(), dose: null });
+    var strength = detailText(details && details.strength !== undefined ? details.strength : '', '规格');
+    var form = detailText(details && details.form !== undefined ? details.form : '', '剂型');
+    checkDuplicateName(clean.medications, normalized, null, strength, form);
+    clean.medications.push({ id: uniqueId('medication', clean.medications), name: normalized, icon: 'pill', schedule: defaultSchedule(), dose: null, strength: strength, form: form, status: 'active' });
     return clean;
   }
 
@@ -365,7 +402,7 @@
     var medication = clean.medications.find(function (item) { return item.id === id; });
     if (!medication) fail('这款药品不存在');
     var normalized = medicationName(name);
-    checkDuplicateName(clean.medications, normalized, id);
+    checkDuplicateName(clean.medications, normalized, id, medication.strength, medication.form);
     medication.name = normalized;
     return clean;
   }
@@ -378,7 +415,7 @@
     if (ICONS.indexOf(entry.icon) < 0) fail('药品图标不正确');
     if (clean.medications.some(function (med) { return med.id === id || med.name.toLocaleLowerCase() === name.toLocaleLowerCase(); })) return clean;
     if (clean.medications.length >= MAX_MEDICATIONS) fail('最多添加 100 种药品');
-    clean.medications.push({id:id, name:name, icon:entry.icon, schedule:defaultSchedule(), dose:null});
+    clean.medications.push({id:id, name:name, icon:entry.icon, schedule:defaultSchedule(), dose:null, strength:'', form:'', status:'active'});
     return clean;
   }
 
@@ -386,7 +423,7 @@
     var clean = validate(data);
     var byId = new Map();
     var stats = clean.medications.map(function (med) {
-      var result = {medicationId:med.id, name:med.name, icon:med.icon, count:0, lastTakenAt:null};
+      var result = {medicationId:med.id, name:med.name, icon:med.icon, strength:med.strength, form:med.form, status:med.status, count:0, lastTakenAt:null};
       byId.set(med.id, result);
       return result;
     });
@@ -415,6 +452,8 @@
         var existing = current.medications.find(function (medication) { return medication.id === item.id; });
         if (existing.schedule.mode === 'none' && item.schedule.mode !== 'none') existing.schedule = item.schedule;
         if (!existing.dose && item.dose) existing.dose = item.dose;
+        if (!existing.strength && item.strength) existing.strength = item.strength;
+        if (!existing.form && item.form) existing.form = item.form;
       }
     });
     imported.records.forEach(function (item) {
@@ -442,8 +481,27 @@
     return clean;
   }
 
+  function setMedicationDetails(data, id, details) {
+    var clean = validate(data);
+    var med = clean.medications.find(function (item) { return item.id === id; });
+    if (!med) fail('这款药品不存在');
+    object(details, '药品信息', ['name', 'strength', 'form']);
+    var name = medicationName(details.name), strength = detailText(details.strength, '规格'), form = detailText(details.form, '剂型');
+    checkDuplicateName(clean.medications, name, id, strength, form);
+    med.name = name; med.strength = strength; med.form = form;
+    return clean;
+  }
+
+  function setMedicationStatus(data, id, status) {
+    var clean = validate(data);
+    var med = clean.medications.find(function (item) { return item.id === id; });
+    if (!med) fail('这款药品不存在');
+    med.status = medicationStatus(status);
+    return clean;
+  }
+
   function scheduledOn(schedule, day) {
-    if (schedule.mode === 'none' || day < schedule.startDate) return false;
+    if (schedule.mode === 'none' || day < schedule.startDate || (schedule.endDate && day > schedule.endDate)) return false;
     if (schedule.mode === 'daily') return true;
     if (schedule.mode === 'interval') return (dayNumber(day) - dayNumber(schedule.startDate)) % schedule.intervalDays === 0;
     var weekday = new Date(day + 'T00:00:00.000Z').getUTCDay() || 7;
@@ -452,7 +510,7 @@
 
   function isScheduledOn(medication, date) {
     if (!medication || typeof medication !== 'object') fail('药品格式不正确');
-    return scheduledOn(validateSchedule(medication.schedule), planDay(date));
+    return (!medication.status || medication.status === 'active') && scheduledOn(validateSchedule(medication.schedule), planDay(date));
   }
 
   function getDayPlan(data, date) {
@@ -468,7 +526,7 @@
     });
     var groups = SLOTS.map(function (slot) { return { slot: slot, medications: [] }; });
     clean.medications.forEach(function (medication) {
-      if (!scheduledOn(medication.schedule, day)) return;
+      if (medication.status !== 'active' || !scheduledOn(medication.schedule, day)) return;
       groups.forEach(function (group) {
         if (medication.schedule.slots.indexOf(group.slot) >= 0) {
           group.medications.push({ medication: medication, record: latest.get(medication.id + '|' + group.slot) || null });
@@ -481,7 +539,8 @@
   function getScheduleLabel(medication) {
     if (!medication || typeof medication !== 'object') fail('药品格式不正确');
     var schedule = validateSchedule(medication.schedule);
-    if (schedule.mode === 'none') return '未设置服药频率';
+    var state = medication.status === 'archived' ? '已归档 · ' : medication.status === 'paused' ? '已暂停 · ' : '';
+    if (schedule.mode === 'none') return state + '未设置服药频率';
     var prefix;
     if (schedule.mode === 'daily') prefix = '每天 ' + schedule.slots.length + ' 次';
     else if (schedule.mode === 'interval') prefix = '每隔 ' + schedule.intervalDays + ' 天';
@@ -489,7 +548,7 @@
       var names = ['一', '二', '三', '四', '五', '六', '日'];
       prefix = '每周' + schedule.weekdays.map(function (day) { return names[day - 1]; }).join('、');
     }
-    return prefix + ' · ' + schedule.slots.map(function (slot) { return SLOT_LABELS[slot]; }).join('、');
+    return state + prefix + ' · ' + schedule.slots.map(function (slot) { return SLOT_LABELS[slot] + (schedule.times[slot] ? ' ' + schedule.times[slot] : ''); }).join('、') + (schedule.endDate ? ' · 至 ' + schedule.endDate : '');
   }
 
   function pad(number) { return String(number).padStart(2, '0'); }
@@ -518,6 +577,8 @@
     getMedicationStats: getMedicationStats,
     setSchedule: setSchedule,
     setDose: setDose,
+    setMedicationDetails: setMedicationDetails,
+    setMedicationStatus: setMedicationStatus,
     getDoseLabel: getDoseLabel,
     doseUnits: DOSE_UNITS,
     isScheduledOn: isScheduledOn,

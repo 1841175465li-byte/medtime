@@ -1,3 +1,4 @@
+const fixture = require('./fixtures.cjs');
 'use strict';
 
 const assert = require('node:assert/strict');
@@ -17,7 +18,7 @@ function memoryStorage(initial = null) {
   };
 }
 
-function record(data = store.defaults(), overrides = {}) {
+function record(data = fixture(), overrides = {}) {
   return store.addRecord(data, {
     medicationId: 'minoxidil', takenAt: '2025-07-12T10:00:00.000Z', note: '早餐后', ...overrides
   }, now);
@@ -31,16 +32,15 @@ function freezeDeep(value) {
   return value;
 }
 
-test('first load is empty with the three requested medicines, with independent defaults', () => {
-  const first = store.load(memoryStorage());
-  assert.equal(first.version, 3);
-  assert.deepEqual(first.medications.map(m => m.name), ['米诺地尔', '异维A酸软胶囊', '非那雄胺']);
-  assert.equal(first.records.length, 0);
-  assert.deepEqual(first.medications[0].schedule, {
-    mode: 'none', slots: [], intervalDays: 2, startDate: '1970-01-01', weekdays: []
-  });
-  first.medications[0].name = 'changed';
-  assert.equal(store.defaults().medications[0].name, '米诺地尔');
+test('first install starts empty; new medication has no suggested schedule or dose', () => {
+  const memory = memoryStorage();
+  const first = store.load(memory);
+  assert.deepEqual(first, {version:4,medications:[],records:[]});
+  assert.equal(memory.raw(),null);
+  const added=store.addMedication(first,'我的药品');
+  assert.equal(added.medications[0].dose,null);
+  assert.equal(added.medications[0].schedule.mode,'none');
+  assert.deepEqual(store.defaults(),first);
 });
 
 test('successful save survives load; failed writes throw and do not report success', () => {
@@ -53,7 +53,7 @@ test('successful save survives load; failed writes throw and do not report succe
 });
 
 test('corrupted or unsupported data is never silently reset or overwritten', () => {
-  ['{bad json', 'null', '{"version":4,"medications":[],"records":[]}'].forEach(raw => {
+  ['{bad json', 'null', '{"version":99,"medications":[],"records":[]}'].forEach(raw => {
     const memory = memoryStorage(raw);
     assert.throws(() => store.load(memory));
     assert.equal(memory.raw(), raw);
@@ -64,7 +64,7 @@ test('corrupted or unsupported data is never silently reset or overwritten', () 
 });
 
 test('record creation and repeated intentional doses are immutable and have unique IDs', () => {
-  const empty = freezeDeep(store.defaults());
+  const empty = freezeDeep(fixture());
   const first = freezeDeep(record(empty));
   const second = record(first);
   assert.equal(empty.records.length, 0);
@@ -114,38 +114,38 @@ test('import merges by IDs, remains idempotent, and keeps current records and hi
   assert.equal(merged.records[0].note, '本机修改保留');
   assert.deepEqual(store.importData(store.exportData(more), merged), merged);
   const renamed = store.renameMedication(more, 'minoxidil', '新名称');
-  assert.equal(store.importData(store.exportData(renamed), store.defaults()).records[0].medicationName, '米诺地尔');
+  assert.equal(store.importData(store.exportData(renamed), fixture()).records[0].medicationName, '米诺地尔');
 });
 
 test('import supports custom medicine definitions and rejects unknown references and duplicate IDs', () => {
-  let custom = store.addMedication(store.defaults(), '自定义药');
+  let custom = store.addMedication(fixture(), '自定义药');
   custom = record(custom, { medicationId: custom.medications.at(-1).id });
-  const merged = store.importData(store.exportData(custom), store.defaults());
+  const merged = store.importData(store.exportData(custom), fixture());
   assert.equal(merged.medications.length, 4);
   assert.equal(merged.records[0].medicationName, '自定义药');
   const bad = JSON.parse(JSON.stringify(custom));
   bad.medications.pop();
-  assert.throws(() => store.importData(JSON.stringify(bad), store.defaults()), /药品不存在/);
+  assert.throws(() => store.importData(JSON.stringify(bad), fixture()), /药品不存在/);
   bad.medications.push(custom.medications.at(-1));
   bad.records.push({ ...bad.records[0] });
-  assert.throws(() => store.importData(JSON.stringify(bad), store.defaults()), /标识重复/);
+  assert.throws(() => store.importData(JSON.stringify(bad), fixture()), /标识重复/);
 });
 
 test('future dates and normalized invalid calendar dates cannot be recorded or imported', () => {
   ['2025-07-12T12:00:00.001Z', '2025-02-30T12:00:00Z', '2025-07-12T24:00:00Z', '2025-07-12T10:00'].forEach(takenAt => {
-    assert.throws(() => record(store.defaults(), { takenAt }));
+    assert.throws(() => record(fixture(), { takenAt }));
   });
   const future = record();
   future.records[0].takenAt = new Date(Date.now() + 86400000).toISOString();
-  assert.throws(() => store.importData(JSON.stringify(future), store.defaults()), /不能晚于/);
-  assert.equal(record(store.defaults(), { takenAt: '2024-02-29T12:00:00+08:00' }).records[0].takenAt, '2024-02-29T04:00:00.000Z');
+  assert.throws(() => store.importData(JSON.stringify(future), fixture()), /不能晚于/);
+  assert.equal(record(fixture(), { takenAt: '2024-02-29T12:00:00+08:00' }).records[0].takenAt, '2024-02-29T04:00:00.000Z');
 });
 
 test('clock rollback preserves stored records, export, deletion, and unchanged-time edits', () => {
   const RealDate = Date;
   const priorClock = new RealDate('2025-07-12T12:00:00Z');
   const memory = memoryStorage();
-  const stored = record(store.defaults(), { takenAt: priorClock.toISOString() });
+  const stored = record(fixture(), { takenAt: priorClock.toISOString() });
   store.save(stored, memory);
   global.Date = class extends RealDate {
     constructor(...args) { super(...(args.length ? args : ['2025-07-12T11:00:00Z'])); }
@@ -167,40 +167,40 @@ test('clock rollback preserves stored records, export, deletion, and unchanged-t
     assert.throws(() => store.addRecord(reloaded, fields), /不能晚于/);
     const added = store.addRecord(reloaded, { ...fields, takenAt: '2025-07-12T11:00:00Z' });
     assert.equal(added.records.length, 2);
-    assert.throws(() => store.importData(store.exportData(reloaded), store.defaults()), /不能晚于/);
+    assert.throws(() => store.importData(store.exportData(reloaded), fixture()), /不能晚于/);
   } finally { global.Date = RealDate; }
 });
 
 test('import accepts a valid historical dose with a creation clock ahead of this device', () => {
   const source = record();
   source.records[0].createdAt = new Date(Date.now() + 86400000).toISOString();
-  const imported = store.importData(JSON.stringify(source), store.defaults());
+  const imported = store.importData(JSON.stringify(source), fixture());
   assert.equal(imported.records[0].createdAt, source.records[0].createdAt);
   assert.equal(imported.records[0].takenAt, source.records[0].takenAt);
 });
 
 test('length, version, structure, and unsafe extra fields are rejected', () => {
-  assert.throws(() => store.addMedication(store.defaults(), ' '));
-  assert.throws(() => store.addMedication(store.defaults(), '药'.repeat(61)));
-  assert.throws(() => store.addMedication(store.defaults(), ' 米诺地尔 '), /同名/);
-  assert.throws(() => record(store.defaults(), { note: '字'.repeat(501) }));
-  const unsupported = store.defaults();
-  unsupported.version = 4;
-  assert.throws(() => store.importData(JSON.stringify(unsupported), store.defaults()), /版本/);
+  assert.throws(() => store.addMedication(fixture(), ' '));
+  assert.throws(() => store.addMedication(fixture(), '药'.repeat(61)));
+  assert.throws(() => store.addMedication(fixture(), ' 米诺地尔 '), /同名/);
+  assert.throws(() => record(fixture(), { note: '字'.repeat(501) }));
+  const unsupported = fixture();
+  unsupported.version = 99;
+  assert.throws(() => store.importData(JSON.stringify(unsupported), fixture()), /版本/);
   const unsafe = '{"version":1,"medications":[],"records":[],"__proto__":{"polluted":true}}';
-  assert.throws(() => store.importData(unsafe, store.defaults()), /不支持的字段/);
+  assert.throws(() => store.importData(unsafe, fixture()), /不支持的字段/);
   assert.equal({}.polluted, undefined);
 });
 
 test('a formatted backup near the local-storage limit can still be imported', () => {
-  const large = record(store.defaults(), { note: '记'.repeat(500) });
+  const large = record(fixture(), { note: '记'.repeat(500) });
   const template = large.records[0];
   large.records = Array.from({ length: 7200 }, (_, index) => ({ ...template, id: 'record-' + index }));
   const memory = memoryStorage();
   store.save(large, memory);
   const backup = store.exportData(large);
   assert.ok(backup.length > memory.raw().length);
-  assert.deepEqual(store.importData(backup, store.defaults()), large);
+  assert.deepEqual(store.importData(backup, fixture()), large);
 });
 
 test('local date helpers group midnight by device timezone, including DST transitions', () => {
@@ -232,7 +232,7 @@ function schedule(overrides = {}) {
   return { mode: 'daily', slots: ['morning'], intervalDays: 2, startDate: '2025-07-01', weekdays: [], ...overrides };
 }
 
-function scheduledData(overrides = {}, id = 'minoxidil', data = store.defaults()) {
+function scheduledData(overrides = {}, id = 'minoxidil', data = fixture()) {
   return store.setSchedule(data, id, schedule(overrides));
 }
 
@@ -246,20 +246,20 @@ function dose(data, { day = 12, hour = 8, slot = null, medicationId = 'minoxidil
   }, new Date('2025-07-16T12:00:00Z'));
 }
 
-test('v1 load migrates without writing or losing history; next save uses v3 at the same key', () => {
+test('v1 load migrates without writing or losing history; next save uses v4 at the same key', () => {
   const original = legacy(record());
   const memory = memoryStorage(JSON.stringify(original));
   const upgraded = store.load(memory);
   assert.equal(store.STORAGE_KEY, 'medtime.data.v1');
-  assert.equal(upgraded.version, 3);
+  assert.equal(upgraded.version, 4);
   assert.deepEqual(legacy(upgraded), original);
   assert.equal(upgraded.records[0].slot, null);
   assert.ok(upgraded.medications.every(m => m.schedule.mode === 'none'));
   assert.equal(memory.raw(), JSON.stringify(original));
   store.save(upgraded, memory);
-  assert.equal(JSON.parse(memory.raw()).version, 3);
+  assert.equal(JSON.parse(memory.raw()).version, 4);
   assert.deepEqual(store.load(memory), upgraded);
-  assert.equal(JSON.parse(store.exportData(original)).version, 3);
+  assert.equal(JSON.parse(store.exportData(original)).version, 4);
 });
 
 test('inactive migration and defaults are deterministic across midnight and independent', () => {
@@ -271,21 +271,21 @@ test('inactive migration and defaults are deterministic across midnight and inde
   };
   try {
     assert.deepEqual(store.load(memoryStorage(JSON.stringify(original))), before);
-    assert.deepEqual(store.defaults().medications[0].schedule, before.medications[0].schedule);
+    assert.deepEqual(fixture().medications[0].schedule, before.medications[0].schedule);
   } finally { global.Date = RealDate; }
-  const disabled = store.setSchedule(store.defaults(), 'minoxidil', schedule({ mode: 'none', slots: [], startDate: '2027-01-01', intervalDays: 3, weekdays: [1] }));
-  assert.deepEqual(disabled.medications[0].schedule, store.defaults().medications[0].schedule);
+  const disabled = store.setSchedule(fixture(), 'minoxidil', schedule({ mode: 'none', slots: [], startDate: '2027-01-01', intervalDays: 3, weekdays: [1] }));
+  assert.deepEqual(disabled.medications[0].schedule, fixture().medications[0].schedule);
   disabled.medications[0].schedule.slots.push('morning');
   assert.deepEqual(disabled.medications[1].schedule.slots, []);
-  assert.deepEqual(store.defaults().medications[0].schedule.slots, []);
+  assert.deepEqual(fixture().medications[0].schedule.slots, []);
 });
 
 test('v1 import merges legacy custom medication and records without replacing an existing schedule', () => {
-  const custom = store.addMedication(store.defaults(), '旧版自定义药品');
+  const custom = store.addMedication(fixture(), '旧版自定义药品');
   const original = legacy(record(custom, { medicationId: custom.medications.at(-1).id, note: '旧版备注保留' }));
   const current = scheduledData({ mode: 'interval', intervalDays: 3 });
   const merged = store.importData(JSON.stringify(original), current);
-  assert.equal(merged.version, 3);
+  assert.equal(merged.version, 4);
   assert.equal(merged.medications.length, 4);
   assert.deepEqual(merged.medications[0].schedule, current.medications[0].schedule);
   assert.equal(merged.medications.at(-1).schedule.mode, 'none');
@@ -295,16 +295,16 @@ test('v1 import merges legacy custom medication and records without replacing an
 });
 
 test('daily scheduling starts inclusively, respects selected slots, and never changes input data', () => {
-  const empty = freezeDeep(store.defaults());
+  const empty = freezeDeep(fixture());
   const planned = freezeDeep(scheduledData({ slots: ['evening', 'morning'], startDate: '2025-07-12' }, 'minoxidil', empty));
   assert.equal(empty.medications[0].schedule.mode, 'none');
   assert.deepEqual(planned.medications[0].schedule.slots, ['morning', 'evening']);
   assert.equal(store.isScheduledOn(planned.medications[0], '2025-07-11'), false);
   assert.equal(store.isScheduledOn(planned.medications[0], '2025-07-12'), true);
   assert.equal(store.isScheduledOn(planned.medications[0], new Date(2025, 6, 13, 20)), true);
-  assert.deepEqual(store.getDayPlan(planned, '2025-07-11').map(group => group.medications), [[], [], []]);
+  assert.deepEqual(store.getDayPlan(planned, '2025-07-11').map(group => group.medications), [[], [], [], []]);
   const day = store.getDayPlan(planned, '2025-07-12');
-  assert.deepEqual(day.map(group => group.slot), ['morning', 'noon', 'evening']);
+  assert.deepEqual(day.map(group => group.slot), ['morning', 'noon', 'evening', 'bedtime']);
   assert.equal(entry(day, 'morning').medication.id, 'minoxidil');
   assert.equal(entry(day, 'morning').record, null);
   assert.equal(day[1].medications.length, 0);
@@ -326,7 +326,7 @@ test('interval scheduling counts calendar days across leap days and year boundar
 
 test('interval and local-day completion stay correct through spring and autumn DST changes', () => {
   const script = `const s=require(${JSON.stringify(storePath)});
-    function scheduled(start) {return s.setSchedule(s.defaults(),'minoxidil',{mode:'interval',slots:['morning'],intervalDays:2,startDate:start,weekdays:[]});}
+    function scheduled(start) {return s.setSchedule(require(${JSON.stringify(path.resolve(__dirname,'fixtures.cjs'))})(),'minoxidil',{mode:'interval',slots:['morning'],intervalDays:2,startDate:start,weekdays:[]});}
     const spring=scheduled('2025-03-08'); const autumn=scheduled('2025-11-01');
     const withDose=s.addRecord(spring,{medicationId:'minoxidil',takenAt:new Date(2025,2,10,0,15).toISOString(),slot:'morning'},new Date('2025-11-10T12:00:00Z'));
     console.log(JSON.stringify({
@@ -350,7 +350,7 @@ test('weekly scheduling uses Monday=1 and Sunday=7, and honors the starting date
 });
 
 test('invalid schedules and record slots are rejected without modifying existing data', () => {
-  const initial = freezeDeep(store.defaults());
+  const initial = freezeDeep(fixture());
   const cases = [
     { mode: 'sometimes' }, { slots: [] }, { slots: ['morning', 'morning'] },
     { slots: ['night'] }, { slots: [null] }, { slots: new Array(1) }, { mode: 'none', slots: ['noon'] },
@@ -369,7 +369,7 @@ test('invalid schedules and record slots are rejected without modifying existing
   const badBackup = scheduledData();
   badBackup.medications[0].schedule.weekdays = [99];
   assert.throws(() => store.importData(JSON.stringify(badBackup), initial), /星期/);
-  const badV2 = store.defaults();
+  const badV2 = fixture();
   delete badV2.medications[0].schedule;
   assert.throws(() => store.load(memoryStorage(JSON.stringify(badV2))), /缺少字段/);
 });
@@ -432,12 +432,12 @@ test('changing a schedule never rewrites historical record slots', () => {
   assert.equal(entry(store.getDayPlan(moved, '2025-07-12'), 'evening').record.id, recorded.records[0].id);
   const disabled = store.setSchedule(moved, 'minoxidil', schedule({ mode: 'none', slots: [] }));
   assert.deepEqual(disabled.records, recorded.records);
-  assert.deepEqual(store.getDayPlan(disabled, '2025-07-12').map(group => group.medications), [[], [], []]);
+  assert.deepEqual(store.getDayPlan(disabled, '2025-07-12').map(group => group.medications), [[], [], [], []]);
 });
 
 test('current backups restore unset schedules but preserve configured schedules, names, and existing record IDs', () => {
   const backed = dose(scheduledData({ slots: ['morning', 'evening'] }), { slot: 'morning' });
-  const current = store.renameMedication(store.defaults(), 'minoxidil', '本机药名');
+  const current = store.renameMedication(fixture(), 'minoxidil', '本机药名');
   const imported = store.importData(store.exportData(backed), current);
   assert.equal(imported.medications[0].name, '本机药名');
   assert.deepEqual(imported.medications[0].schedule, backed.medications[0].schedule);
@@ -455,11 +455,11 @@ test('current backups restore unset schedules but preserve configured schedules,
   const memory = memoryStorage();
   store.save(imported, memory);
   assert.deepEqual(store.load(memory), imported);
-  assert.equal(JSON.parse(store.exportData(imported)).version, 3);
+  assert.equal(JSON.parse(store.exportData(imported)).version, 4);
 });
 
 test('schedule labels describe daily, interval, weekly and unset choices', () => {
-  assert.equal(store.getScheduleLabel(store.defaults().medications[0]), '未设置服药频率');
+  assert.equal(store.getScheduleLabel(fixture().medications[0]), '未设置服药频率');
   assert.equal(store.getScheduleLabel(scheduledData({ slots: ['evening', 'morning'] }).medications[0]), '每天 2 次 · 早、晚');
   assert.equal(store.getScheduleLabel(scheduledData({ mode: 'interval' }).medications[0]), '每隔 2 天 · 早');
   assert.equal(store.getScheduleLabel(scheduledData({ mode: 'weekly', weekdays: [3, 1], slots: ['evening'] }).medications[0]), '每周一、三 · 晚');

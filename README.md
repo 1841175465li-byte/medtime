@@ -1,68 +1,74 @@
 # 药记（Medtime）
 
-一个离线优先的 Android 用药记录工具。数据只保存在设备本地，不需要账号或网络。
+一个完全离线的 Android 用药记录与辅助提醒工具，数据保存在设备本地，无需账号。
 
-当前版本 1.6.0，包含：
+当前版本 **1.7.0**。
 
-- 90 项内置药品和营养补充品，可按中文、拼音、首字母和类别搜索。
-- 个人药品的服药频率、每次用量、早中晚安排和累计次数统计。
-- 首页早、中、晚独立闹钟，双列小时/分钟滚轮，以及 Android 锁屏和后台提醒支持。
-- 首页记录与“补记用药”入口，记录可编辑、删除和撤销；数据支持 JSON 导入导出。
-- 设置中的用途说明、提醒限制和数据保管免责声明。
+- 全新安装从空列表开始，引导添加自己的药品、核对信息、设置实际频率并检查提醒。
+- 支持规格、剂型、默认每次用量，以及每款药的独立提醒时间、早中晚和睡前四个时段。
+- 疗程结束日期、暂停安排和归档；保留历史记录，归档移回后保持暂停。
+- 原生后台提醒、10 分钟稍后提醒、通知操作、音量与授权检查，以及需用户确认结果的锁屏试响。
+- 90 项名称库，中文／拼音／首字母搜索，记录编辑、删除、撤销、累计次数和 JSON 备份。
 
-应用不提供诊断、处方或个体化治疗建议。药品库名称用于查找，不代表推荐或长期使用建议；请按医生、药师或产品说明核对用药信息。
+药品库仅用于名称查找，应用不提供诊断、处方或个体化治疗建议。药品、用量和频率由用户核对填写。
 
-## 下载
+## 下载与使用
 
-[下载 Android APK（1.6.0）](./medtime-1.6.0.apk?raw=true) · [SHA-256 校验](./medtime-1.6.0.apk.sha256) · [使用说明](./使用说明.md)
+[下载 Android APK（1.7.0）](./medtime-1.7.0.apk?raw=true) · [SHA-256](./medtime-1.7.0.apk.sha256) · [使用说明与真机测试步骤](./使用说明.md)
 
-最低支持 Android 8.0（API 26），目标 Android 15（API 35）。已有安装可直接覆盖升级；同一签名的版本会保留应用数据。当前 APK 是个人本地签名包，不代表应用商店发布版本。
+最低 Android 8.0（API 26），目标 Android 15（API 35）。本次包名和签名不变，可覆盖升级；旧数据与三个时段的开关保留，新增睡前提醒默认关闭。升级前建议导出备份，不要先卸载旧版。
+
+**目前尚未在实体 Android 设备或模拟器上验证响铃和系统权限。** 已完成的编译、规则和浏览器检查不能证明真实设备的声音、振动、锁屏或厂商省电兼容性。首次使用请按说明完成锁屏试响；系统触发和播放器启动不会自动记作“实际听到”。
 
 ## 界面预览
 
 <p>
-  <img src="design/my-meds-v1.6.png" alt="我的药品列表" width="260">
-  <img src="design/settings-v1.6.png" alt="设置与免责声明入口" width="260">
+  <img src="design/welcome-v1.7.png" alt="首次安装的空列表引导" width="260">
+  <img src="design/schedule-v1.7.png" alt="独立提醒时间、睡前与疗程设置" width="260">
 </p>
 
-预览使用空记录的独立页面，安装包不包含测试用药记录。
+第二张截图使用单独的演示数据，不包含在安装包中，也不代表真实个人用药或推荐剂量。
 
-## 源码目录
+## 提醒与数据规则
+
+每个时段的开关控制该时段内全部药品，包括使用独立时间的药品；药品下方显示实际安排时间。暂停、归档或疗程结束会停止对应安排，已保存的历史仍保留。
+
+稍后提醒只延后当前仍有效的正式提醒，不增加用药记录，不改原频率，仅在同一日内有效。停止、完成、改时或暂停等行为以说明中的规则为准。
+
+新版本读取旧备份并迁移到 v4；1.7.0 扩展备份需本版或兼容更新版本恢复。导入保留本机已有信息、记录以及暂停／归档状态。设备时段开关、系统权限、延后队列和试响结果不写入药品 JSON 备份。
+
+## 源码
 
 | 目录 | 内容 |
 | --- | --- |
-| `web/` | 离线 WebView 界面、药品库、数据存储、提醒设置和时间滚轮 |
-| `android/` | Android WebView 包装、原生闹钟排程、通知和响铃服务 |
-| `tests/` | Node 数据测试和原生闹钟日历规则测试 |
-| `design/` | 界面说明和预览图 |
-| `使用说明.md` | 面向用户的安装、用药记录、备份和提醒说明 |
-| `药品库说明.md` | 内置名称、分类和来源说明 |
+| web/ | 离线界面、名称库、数据规则、提醒设置和时间滚轮 |
+| android/ | 原生排程、通知、响铃、系统权限、文件选择器与构建脚本 |
+| tests/ | Node 数据测试及纯 Java 日历规则测试 |
+| design/ | 界面说明和预览图 |
+| 使用说明.md | 安装、设置、备份、记录和手机验收步骤 |
+| 药品库说明.md | 内置名称、分类和来源 |
 
-## 本地构建
+## 本地构建与测试
 
-在 `android/` 目录运行：
+在 android 目录使用 Windows PowerShell：
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\prepare-toolchain.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
-```
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\prepare-toolchain.ps1
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
-首次准备脚本从 Microsoft 和 Google 官方站点下载固定版本的便携 JDK、Android Platform 和 Build Tools，并校验 SHA-256。工具链、构建中间产物和本地签名文件默认放在本仓库的 `work/android-build/`，已由 `.gitignore` 排除。发布包的私有签名未上传；另一台电脑生成的签名无法覆盖本仓库提供的 APK。构建自己的版本时可传入新的 `-WorkRoot` 和 `-OutputApk`。
+准备脚本从官方站点下载固定版本便携工具并校验 SHA-256。工具链、中间产物和本地签名放在本仓库 work/android-build，已由 .gitignore 排除。发布包的私有签名没有上传；新生成的签名不能覆盖此处提供的 APK。
 
-在仓库根目录运行数据测试（Node.js 18 或更新版本）：
+仓库根目录运行数据测试（Node.js 18+）：
 
-```powershell
-node --test tests/store.test.cjs tests/catalog-stats.test.cjs tests/reminders.test.cjs tests/dose.test.cjs
-```
+    node --test tests/store.test.cjs tests/catalog-stats.test.cjs tests/reminders.test.cjs tests/dose.test.cjs tests/management.test.cjs
 
-原生 `AlarmPlan` 测试的编译命令见 [`android/README.md`](./android/README.md)。浏览器测试使用本地静态服务器和 Playwright；它们不能代替实体 Android 设备对系统授权、后台响铃、声音和振动的验证。
+原生规则测试命令见 [Android 工程说明](./android/README.md)。网页可用静态服务器预览，后台闹钟只在安卓安装版提供。
 
-发布验证：46 项 Node 数据测试通过；1.6 界面已通过 18 组浏览器检查，覆盖 320、360、432 像素手机宽度和桌面。APK 已检查资源、对齐及签名，尚未在实体 Android 设备或模拟器上验证系统响铃与授权表现。
+1.7.0 已通过 **57 项 Node 测试、61 项纯 Java 断言、28 组浏览器检查**。浏览器使用 Edge／Playwright，覆盖 320、360、432、1280 像素宽度；页面内容、错误提示层、控制台和横向溢出检查通过，截图人工检查完成。交互覆盖首次设置、独立时间、暂停归档、疗程结束、规格快照、记录编辑／删除／撤销、备份和旧数据迁移。Android 接口使用显式模拟，只验证参数及界面。
 
-## 隐私和数据
+APK 已通过资源／Java／DEX 编译、逐个网页资源哈希、ZIP 对齐和 v2/v3 签名检查。
 
-应用默认不联网，不申请网络、定位、相机或广泛存储权限。药品、频率、用量和记录保存在应用私有存储中；卸载或清除应用数据可能删除它们，请定期导出备份。设备闹钟开关和系统授权属于当前设备设置，不写入 JSON 备份，换机后需要重新开启。
+## 隐私与开源协议
 
-## 开源协议
+应用不申请网络、定位、相机或广泛存储权限。数据仅保存在应用私有存储，卸载或清除数据会删除记录，请定期导出备份。备份含个人用药信息，请妥善保存。
 
-本项目按 [MIT License](./LICENSE) 发布。Android SDK、JDK、系统 WebView 和其他第三方组件仍受各自许可证约束。
+按 [MIT License](./LICENSE) 发布。Android SDK、JDK、系统 WebView 等第三方组件受各自许可证约束。

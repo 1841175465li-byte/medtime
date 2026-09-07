@@ -1,3 +1,4 @@
+const fixture = require('./fixtures.cjs');
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
@@ -9,7 +10,7 @@ const memory=(initial=null)=>({value:initial,getItem(key){assert.equal(key,R.STO
 test('all alarms are opt-in and have independent times; loading never overwrites other data',()=>{
   const db=memory(), first=R.load(db);
   assert.equal(db.value,null);
-  assert.deepEqual(first,{version:1,morning:{enabled:false,time:'08:00'},noon:{enabled:false,time:'12:30'},evening:{enabled:false,time:'20:00'}});
+  assert.deepEqual(first,{version:2,morning:{enabled:false,time:'08:00'},noon:{enabled:false,time:'12:30'},evening:{enabled:false,time:'20:00'},bedtime:{enabled:false,time:'22:00'}});
   const next=R.setAlarm(first,'morning',true,'07:15');
   assert.equal(first.morning.enabled,false);
   assert.equal(next.morning.time,'07:15');
@@ -38,7 +39,7 @@ test('disabling an alarm preserves its selected time and other periods',()=>{
 });
 
 test('native mirror carries schedules and explicit-slot completions without notes or unrelated history',()=>{
-  let data=S.defaults();
+  let data=fixture();
   data=S.setSchedule(data,'minoxidil',{mode:'interval',slots:['morning','evening'],intervalDays:2,startDate:'2025-07-01',weekdays:[]});
   const clock=new Date('2025-07-12T12:00:00Z');
   for(const [slot,at] of [[null,'2025-07-12T01:00:00Z'],['morning','2025-07-12T01:00:00Z'],['evening','2025-01-01T01:00:00Z']])
@@ -56,7 +57,7 @@ test('native mirror carries schedules and explicit-slot completions without note
 
 test('mirror refresh reflects editing/deletion/undo so completed periods can cancel pending alarms',()=>{
   const now=new Date('2025-07-12T12:00:00Z');
-  const original=S.addRecord(S.defaults(),{medicationId:'minoxidil',slot:'morning',takenAt:'2025-07-12T00:00:00Z',note:''},now);
+  const original=S.addRecord(fixture(),{medicationId:'minoxidil',slot:'morning',takenAt:'2025-07-12T00:00:00Z',note:''},now);
   const changed=S.updateRecord(original,original.records[0].id,{medicationId:'minoxidil',slot:'evening',takenAt:original.records[0].takenAt,note:''},now);
   assert.equal(R.snapshot(changed,R.defaults(),now).records[0].slot,'evening');
   assert.equal(R.snapshot(S.deleteRecord(changed,changed.records[0].id),R.defaults(),now).records.length,0);
@@ -73,10 +74,10 @@ test('20 supplement names support Chinese/pinyin/common aliases and the existing
   assert.equal(C.search('钙片')[0].name,'钙补充剂');
   assert.equal(C.search('DHA')[0].name,'藻油DHA');
   const fish=C.items.find(i=>i.name==='鱼油');
-  let data=S.addCatalogMedication(S.defaults(),{id:fish.id,name:fish.name,icon:fish.icon});
+  let data=S.addCatalogMedication(fixture(),{id:fish.id,name:fish.name,icon:fish.icon});
   data=S.setSchedule(data,fish.id,{mode:'weekly',slots:['evening'],intervalDays:2,startDate:'2025-07-01',weekdays:[1,3,5]});
   data=S.addRecord(data,{medicationId:fish.id,takenAt:'2025-07-11T11:00:00Z',slot:'evening',note:''},new Date('2025-07-12T12:00:00Z'));
   assert.equal(S.getMedicationStats(data).find(s=>s.medicationId===fish.id).count,1);
-  assert.deepEqual(S.importData(S.exportData(data),S.defaults()),data);
+  assert.deepEqual(S.importData(S.exportData(data),fixture()),data);
   assert.equal(R.snapshot(data,R.defaults(),'2025-07-12T12:00:00Z').medications.at(-1).schedule.mode,'weekly');
 });

@@ -1,3 +1,4 @@
+const fixture = require('./fixtures.cjs');
 'use strict';
 const assert = require('node:assert/strict');
 const {test} = require('node:test');
@@ -14,13 +15,13 @@ test('catalog is separate from personal medicines and contains valid unique entr
   assert.equal(new Set(C.items.map(item => item.id)).size, 90);
   assert.equal(new Set(C.items.map(item => item.name)).size, 90);
   C.categories.forEach(category => assert.ok(C.search('', category.id).length > 0));
-  let data = S.defaults();
+  let data = fixture();
   assert.equal(data.medications.length, 3);
   for (const item of C.items) data = S.addCatalogMedication(data, fields(item));
   assert.equal(data.medications.length, 90);
   assert.equal(data.records.length, 0);
   assert.ok(data.medications.every(med => med.schedule.mode === 'none'));
-  assert.deepEqual(S.importData(S.exportData(data), S.defaults()), data);
+  assert.deepEqual(S.importData(S.exportData(data), fixture()), data);
 });
 
 test('search finds Chinese, pinyin, initials, spaced/tone/fullwidth input and name variants', () => {
@@ -39,7 +40,7 @@ test('search finds Chinese, pinyin, initials, spaced/tone/fullwidth input and na
 
 test('catalog adding is idempotent, survives renaming and keeps distinct formulation names', () => {
   const metformin = entry('二甲双胍');
-  let data = S.addCatalogMedication(S.defaults(), fields(metformin));
+  let data = S.addCatalogMedication(fixture(), fields(metformin));
   data = S.setSchedule(data, metformin.id, {mode:'daily',slots:['morning'],intervalDays:2,startDate:'2025-07-12',weekdays:[]});
   const original = S.exportData(data);
   assert.deepEqual(S.addCatalogMedication(data, fields(metformin)), data);
@@ -50,16 +51,16 @@ test('catalog adding is idempotent, survives renaming and keeps distinct formula
   assert.deepEqual(S.addCatalogMedication(data, fields(metformin)), data);
   assert.equal(data.medications.at(-1).schedule.mode, 'daily');
   assert.ok(original.includes('二甲双胍'));
-  const custom = S.addMedication(S.defaults(), '二甲双胍');
+  const custom = S.addMedication(fixture(), '二甲双胍');
   assert.equal(C.findAdded(metformin, custom.medications).id, custom.medications.at(-1).id);
   assert.equal(S.addCatalogMedication(custom, fields(metformin)).medications.length, 4);
-  const distinct = S.addMedication(S.defaults(), '二甲双胍缓释片');
+  const distinct = S.addMedication(fixture(), '二甲双胍缓释片');
   assert.equal(C.findAdded(metformin, distinct.medications), undefined);
   assert.equal(S.addCatalogMedication(distinct, fields(metformin)).medications.length, 5);
 });
 
 test('every saved event counts including repeats and unassigned slots; unused medicines show zero', () => {
-  let data = add(S.defaults());
+  let data = add(fixture());
   data = add(data, 'minoxidil', 'morning');
   data = add(data, 'minoxidil', 'evening', '2025-07-12T10:00:00Z');
   data = add(data, 'finasteride', null, '2025-07-11T01:00:00Z');
@@ -73,7 +74,7 @@ test('every saved event counts including repeats and unassigned slots; unused me
 });
 
 test('rename, reassignment, time edits, deletion, undo snapshot and backup keep counts accurate', () => {
-  let data = add(add(S.defaults()), 'minoxidil', 'evening', '2025-07-12T10:00:00Z');
+  let data = add(add(fixture()), 'minoxidil', 'evening', '2025-07-12T10:00:00Z');
   data = S.renameMedication(data, 'minoxidil', '米诺地尔片');
   assert.equal(S.getMedicationStats(data)[0].name, '米诺地尔片');
   assert.equal(S.getMedicationStats(data)[0].count, 2);
@@ -86,14 +87,14 @@ test('rename, reassignment, time edits, deletion, undo snapshot and backup keep 
   assert.equal(S.getMedicationStats(data)[0].lastTakenAt, null);
   data = beforeDelete;
   assert.deepEqual(S.getMedicationStats(data).map(item => item.count), [1,0,1]);
-  const restored = S.importData(S.exportData(data), S.defaults());
+  const restored = S.importData(S.exportData(data), fixture());
   assert.deepEqual(S.getMedicationStats(restored).map(item => item.count), [1,0,1]);
   assert.deepEqual(S.getMedicationStats(S.importData(S.exportData(data), restored)), S.getMedicationStats(restored));
 });
 
 test('legacy records with historical names count by stable medicine ID', () => {
-  const data = S.defaults();
-  const legacy = {version:1, medications:data.medications.map(({schedule, dose, ...med}) => med), records:[
+  const data = fixture();
+  const legacy = {version:1, medications:data.medications.map(({id, name, icon}) => ({id, name, icon})), records:[
     {id:'old-1',medicationId:'minoxidil',medicationName:'旧药名',takenAt:'2024-07-01T00:00:00Z',createdAt:'2024-07-01T00:00:00Z',note:''}
   ]};
   assert.equal(S.getMedicationStats(legacy)[0].count, 1);

@@ -47,7 +47,7 @@ public final class AlarmPlanTest {
         check(AlarmPlan.keepDue("morning",ON,meds,EMPTY,due,Instant.ofEpochMilli(due+1000),SH,""),"refresh at due time keeps queued broadcast");
         check(!AlarmPlan.keepDue("morning",ON,meds,EMPTY,due,Instant.ofEpochMilli(due+1000),SH,"2025-07-13T08:00"),"consumed broadcast never kept");
         check(!AlarmPlan.keepDue("morning",ON,meds,done,due,Instant.ofEpochMilli(due+1000),SH,""),"completion removes queued reminder");
-        check(!AlarmPlan.keepDue("morning",ON,meds,EMPTY,due,Instant.ofEpochMilli(due+61000),SH,""),"old due time expires");
+        check(!AlarmPlan.keepDue("morning",ON,meds,EMPTY,due,Instant.ofEpochMilli(due+3600001),SH,""),"old due time expires");
         ZoneId ny=ZoneId.of("America/New_York");
         equal(next("morning",new AlarmPlan.Alarm(true,"02:30"),meds,EMPTY,"2025-03-09T05:00:00Z",ny,""),at("2025-03-09T07:30:00Z"),"DST gap shifts to first valid corresponding time");
         equal(next("morning",new AlarmPlan.Alarm(true,"01:30"),meds,EMPTY,"2025-11-02T04:00:00Z",ny,""),at("2025-11-02T05:30:00Z"),"DST overlap uses earlier offset");
