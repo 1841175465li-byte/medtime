@@ -44,10 +44,6 @@ public final class AlarmSoundService extends Service {
     private boolean sounding;
     private boolean proofTest;
     static boolean isRinging() { AlarmSoundService service=running; return service != null && SystemClock.elapsedRealtime() < service.deadline; }
-    static Map<String,Long> activeOccurrences() {
-        AlarmSoundService service=running;
-        return service!=null && isRinging()?service.occurrenceSnapshot:Collections.emptyMap();
-    }
     private static String slotOf(String key) { return key.split("\\|",2)[0]; }
     private void publishOccurrences() {
         Map<String,Long> snapshot=new LinkedHashMap<>(active); snapshot.remove("test");
@@ -104,7 +100,6 @@ public final class AlarmSoundService extends Service {
         Set<String> slots=new LinkedHashSet<>(); for (String key:active.keySet()) slots.add(slotOf(key));
         for (String slot:slots) { if (labels.length()>0) labels.append("、"); labels.append(AlarmScheduler.label(slot)); }
         PendingIntent stop=PendingIntent.getBroadcast(this,601,new Intent(this,AlarmReceiver.class).setAction(AlarmScheduler.STOP),PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        PendingIntent snooze=PendingIntent.getBroadcast(this,602,new Intent(this,AlarmReceiver.class).setAction(AlarmScheduler.SNOOZE),PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification publicVersion=new Notification.Builder(this,AlarmScheduler.CHANNEL).setSmallIcon(R.drawable.ic_alarm)
             .setContentTitle("药记 · 用药闹钟").setContentText("点击查看或停止响铃").build();
         Notification.Builder builder=new Notification.Builder(this,AlarmScheduler.CHANNEL).setSmallIcon(R.drawable.ic_alarm)
@@ -115,7 +110,6 @@ public final class AlarmSoundService extends Service {
             .setContentIntent(AlarmScheduler.openIntent(this,600))
             .setDeleteIntent(stop)
             .addAction(new Notification.Action.Builder(null,"停止响铃",stop).build());
-        if (!occurrenceSnapshot.isEmpty()) builder.addAction(new Notification.Action.Builder(null,"稍后 10 分钟",snooze).build());
         return builder.addAction(new Notification.Action.Builder(null,"打开药记",AlarmScheduler.openIntent(this,600)).build()).build();
     }
     private void startSound() {

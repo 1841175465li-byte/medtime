@@ -26,11 +26,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Minimal private mirror, regular alarms, and explicitly requested deferred reminders. */
+/** Minimal private mirror, regular alarms, and explicit lock-screen tests. */
 public final class AlarmScheduler {
     static final String CHANNEL="medtime.alarms.v1", FIRE="com.medtime.app.ALARM_FIRE";
     static final String STOP="com.medtime.app.ALARM_STOP", OPEN="com.medtime.app.ALARM_OPEN";
-    static final String SNOOZE="com.medtime.app.ALARM_SNOOZE", SNOOZE_FIRE="com.medtime.app.SNOOZE_FIRE", TEST_FIRE="com.medtime.app.TEST_FIRE";
+    static final String TEST_FIRE="com.medtime.app.TEST_FIRE";
     static final int NOTIFICATION_ID=301;
     static SharedPreferences prefs(Context ctx) { return ctx.getSharedPreferences("medtime_native_alarms",Context.MODE_PRIVATE); }
     static String label(String slot) {
@@ -89,7 +89,7 @@ public final class AlarmScheduler {
     static void ensureChannel(Context ctx) {
         NotificationManager manager=ctx.getSystemService(NotificationManager.class);
         NotificationChannel channel=new NotificationChannel(CHANNEL,"用药闹钟",NotificationManager.IMPORTANCE_HIGH);
-        channel.setDescription("早中晚及睡前提醒，使用系统闹钟音量，可停止或稍后提醒");
+        channel.setDescription("早中晚及睡前提醒，使用系统闹钟音量，可停止响铃或打开药记");
         channel.setSound(null,null); channel.enableVibration(false);
         channel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PRIVATE);
         manager.createNotificationChannel(channel);
@@ -107,11 +107,6 @@ public final class AlarmScheduler {
     private static PendingIntent alarmIntent(Context ctx,String slot,long at,int flags) {
         return PendingIntent.getBroadcast(ctx,400+AlarmPlan.index(slot),new Intent(ctx,AlarmReceiver.class).setAction(FIRE).putExtra("slot",slot).putExtra("at",at),flags|PendingIntent.FLAG_IMMUTABLE);
     }
-    private static PendingIntent deferredIntent(Context ctx,String slot,long origin,long at,int flags) {
-        Intent intent=new Intent(ctx,AlarmReceiver.class).setAction(SNOOZE_FIRE)
-            .setData(Uri.parse("medtime://snooze/"+slot+"/"+origin)).putExtra("slot",slot).putExtra("origin",origin).putExtra("at",at);
-        return PendingIntent.getBroadcast(ctx,700,intent,flags|PendingIntent.FLAG_IMMUTABLE);
-    }
     private static PendingIntent testIntent(Context ctx,long at,int flags) {
         return PendingIntent.getBroadcast(ctx,701,new Intent(ctx,AlarmReceiver.class).setAction(TEST_FIRE).putExtra("at",at),flags|PendingIntent.FLAG_IMMUTABLE);
     }
@@ -125,18 +120,26 @@ public final class AlarmScheduler {
         cancel(ctx,alarmIntent(ctx,slot,0,PendingIntent.FLAG_NO_CREATE));
         prefs(ctx).edit().remove("next."+slot).apply();
     }
-    private static JSONArray snoozes(Context ctx) throws Exception {
-        JSONArray items=new JSONArray(prefs(ctx).getString("snoozes","[]"));
-        if (items.length()>400) throw new IllegalArgumentException("稍后提醒过多");
-        return items;
+    /** Cancel 1.7.0 deferred alarms during upgrade; never register them again. */
+    static synchronized void clearLegacySnoozes(Context ctx) {
+        if (!prefs(ctx).contains("snoozes")) return;
+        try {
+            JSONArray items=new JSONArray(prefs(ctx).getString("snoozes","[]"));
+            for (int i=0;i<items.length();i++) {
+                try {
+                    JSONObject item=items.getJSONObject(i);
+                    Intent intent=new Intent(ctx,AlarmReceiver.class).setAction("com.medtime.app.SNOOZE_FIRE")
+                        .setData(Uri.parse("medtime://snooze/"+item.getString("slot")+"/"+item.getLong("origin")));
+                    cancel(ctx,PendingIntent.getBroadcast(ctx,700,intent,PendingIntent.FLAG_NO_CREATE|PendingIntent.FLAG_IMMUTABLE));
+                } catch (Exception ignored) { }
+            }
+        } catch (Exception ignored) { }
+        prefs(ctx).edit().remove("snoozes").apply();
+        cancel(ctx,PendingIntent.getBroadcast(ctx,602,new Intent(ctx,AlarmReceiver.class).setAction("com.medtime.app.ALARM_SNOOZE"),PendingIntent.FLAG_NO_CREATE|PendingIntent.FLAG_IMMUTABLE));
     }
     private static void cancelAll(Context ctx) {
         for (String slot:AlarmPlan.SLOTS) cancelSlot(ctx,slot);
-        try {
-            JSONArray items=snoozes(ctx);
-            for (int i=0;i<items.length();i++) { JSONObject item=items.getJSONObject(i); cancel(ctx,deferredIntent(ctx,item.getString("slot"),item.getLong("origin"),0,PendingIntent.FLAG_NO_CREATE)); }
-        } catch (Exception ignored) { }
-        prefs(ctx).edit().putString("snoozes","[]").apply();
+        clearLegacySnoozes(ctx);
         cancelTest(ctx);
     }
     public static synchronized JSONObject sync(Context ctx,String text) {
@@ -155,6 +158,7 @@ public final class AlarmScheduler {
         reschedule(ctx,null,0);
     }
     private static synchronized void reschedule(Context ctx,String catchingSlot,long caughtAt) {
+        clearLegacySnoozes(ctx);
         ensureChannel(ctx);
         if (prefs(ctx).getBoolean("paused",false) || !notificationsAllowed(ctx) || !exactAllowed(ctx)) { cancelAll(ctx); stop(ctx); return; }
         if (!prefs(ctx).contains("snapshot")) return;
@@ -172,16 +176,6 @@ public final class AlarmScheduler {
                 if (!prefs(ctx).edit().putLong("next."+slot,at).commit()) throw new IllegalStateException("闹钟时间保存失败");
                 register(ctx,at,alarmIntent(ctx,slot,at,PendingIntent.FLAG_UPDATE_CURRENT));
             }
-            JSONArray old=snoozes(ctx), kept=new JSONArray();
-            for (int i=0;i<old.length();i++) {
-                JSONObject item=old.getJSONObject(i); String slot=item.getString("slot");
-                long origin=item.getLong("origin"), at=item.getLong("at");
-                if (AlarmPlan.index(slot)<0 || at<now.toEpochMilli()-60*60*1000 || !AlarmPlan.snoozeEligible(slot,snapshot.alarms.get(slot),snapshot.meds,done,origin,at,zone)) {
-                    cancel(ctx,deferredIntent(ctx,slot,origin,0,PendingIntent.FLAG_NO_CREATE)); continue;
-                }
-                kept.put(item); register(ctx,at,deferredIntent(ctx,slot,origin,at,PendingIntent.FLAG_UPDATE_CURRENT));
-            }
-            if (!prefs(ctx).edit().putString("snoozes",kept.toString()).commit()) throw new IllegalStateException("稍后提醒保存失败");
             long testAt=prefs(ctx).getLong("test.next",0);
             if (testAt>0) {
                 if (testAt<now.toEpochMilli()-60000) cancelTest(ctx);
@@ -207,45 +201,6 @@ public final class AlarmScheduler {
             if (lateness>=0) reschedule(ctx,slot,at); else reschedule(ctx);
             return due;
         } catch (Exception error) { suspend(ctx,"闹钟数据暂时无法读取，请打开应用重新保存"); return false; }
-    }
-    public static synchronized JSONObject snooze(Context ctx) {
-        try {
-            if (!notificationsAllowed(ctx) || !exactAllowed(ctx)) throw new IllegalStateException("请先允许通知和准时闹钟");
-            Map<String,Long> active=AlarmSoundService.activeOccurrences();
-            if (active.isEmpty()) throw new IllegalStateException("当前没有正在响铃的用药提醒");
-            Snapshot snapshot=snapshot(ctx); ZoneId zone=ZoneId.systemDefault(); Set<String> done=AlarmPlan.completions(snapshot.doses,zone);
-            long now=System.currentTimeMillis(), at=now+10*60*1000; JSONArray old=snoozes(ctx), next=new JSONArray();
-            Set<String> replacing=new HashSet<>();
-            for (Map.Entry<String,Long> entry:active.entrySet()) {
-                String slot=entry.getKey().split("\\|",2)[0]; long origin=entry.getValue();
-                if (now<origin || !AlarmPlan.snoozeEligible(slot,snapshot.alarms.get(slot),snapshot.meds,done,origin,at,zone)) continue;
-                replacing.add(slot+"|"+origin); next.put(new JSONObject().put("slot",slot).put("origin",origin).put("at",at));
-            }
-            if (next.length()==0) throw new IllegalStateException("该安排已完成、已更改或将跨日，不能延后提醒");
-            for (int i=0;i<old.length();i++) { JSONObject item=old.getJSONObject(i); if (!replacing.contains(item.getString("slot")+"|"+item.getLong("origin"))) next.put(item); }
-            if (next.length()>400 || !prefs(ctx).edit().putString("snoozes",next.toString()).commit()) throw new IllegalStateException("稍后提醒保存失败");
-            reschedule(ctx);
-            if (!prefs(ctx).getString("error","").isEmpty()) throw new IllegalStateException("稍后提醒未能排入系统");
-            stop(ctx); return reply(true,"").put("at",at);
-        } catch (Exception error) { return reply(false,error.getMessage()); }
-    }
-    static synchronized boolean consumeSnooze(Context ctx,String slot,long origin,long at) {
-        try {
-            if (AlarmPlan.index(slot)<0 || !notificationsAllowed(ctx) || !exactAllowed(ctx)) return false;
-            long now=System.currentTimeMillis();
-            if (now<at) { reschedule(ctx); return false; }
-            JSONArray old=snoozes(ctx), next=new JSONArray(); boolean found=false;
-            for (int i=0;i<old.length();i++) {
-                JSONObject item=old.getJSONObject(i);
-                if (slot.equals(item.getString("slot")) && origin==item.getLong("origin") && at==item.getLong("at")) found=true;
-                else next.put(item);
-            }
-            if (!found || !prefs(ctx).edit().putString("snoozes",next.toString()).commit()) return false;
-            cancel(ctx,deferredIntent(ctx,slot,origin,0,PendingIntent.FLAG_NO_CREATE));
-            Snapshot snapshot=snapshot(ctx); ZoneId zone=ZoneId.systemDefault();
-            boolean due=now>=at && now-at<=60*60*1000 && AlarmPlan.snoozeEligible(slot,snapshot.alarms.get(slot),snapshot.meds,AlarmPlan.completions(snapshot.doses,zone),origin,now,zone);
-            reschedule(ctx); return due;
-        } catch (Exception error) { suspend(ctx,"稍后提醒无法恢复，请检查提醒设置"); return false; }
     }
     public static synchronized JSONObject scheduleTest(Context ctx) {
         try {
@@ -290,7 +245,7 @@ public final class AlarmScheduler {
             AudioManager audio=ctx.getSystemService(AudioManager.class); int volume=audio.getStreamVolume(AudioManager.STREAM_ALARM);
             result.put("supported",true).put("notifications",notifications).put("exact",exact)
                 .put("ready",notifications && exact && volume>0 && !prefs(ctx).getBoolean("paused",false) && error.isEmpty())
-                .put("ringing",AlarmSoundService.isRinging()).put("canSnooze",!AlarmSoundService.activeOccurrences().isEmpty()).put("error",error)
+                .put("ringing",AlarmSoundService.isRinging()).put("error",error)
                 .put("alarmVolume",volume).put("maxAlarmVolume",audio.getStreamMaxVolume(AudioManager.STREAM_ALARM))
                 .put("powerSave",ctx.getSystemService(PowerManager.class).isPowerSaveMode())
                 .put("backgroundRestricted",Build.VERSION.SDK_INT>=28 && ctx.getSystemService(ActivityManager.class).isBackgroundRestricted())
@@ -299,7 +254,7 @@ public final class AlarmScheduler {
                 .put("testTriggered",prefs(ctx).getLong("test.triggered",0)).put("testAudioStarted",prefs(ctx).getLong("test.audio",0))
                 .put("testResult",prefs(ctx).getString("test.result","none"));
             for (String slot:AlarmPlan.SLOTS) scheduled.put(slot,notifications && exact?prefs(ctx).getLong("next."+slot,0):0);
-            result.put("scheduled",scheduled).put("snoozed",snoozes(ctx));
+            result.put("scheduled",scheduled);
         } catch (Exception ignored) { }
         return result;
     }

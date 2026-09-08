@@ -36,6 +36,7 @@
   let medView = 'mine', medSearch = '', medCategory = '', statsExpanded = false;
   let alarmSettings = R.defaults(), alarmError = '', nativeAlarm = {supported:false,ready:false,scheduled:{}};
   let alarmPicker = null;
+  let medTimeDialog = null;
   let toastTimer, undoAction = null, observedDay = S.localDay(new Date());
   const sortRecords = records => [...records].sort((a, b) => new Date(b.takenAt) - new Date(a.takenAt));
   const time = value => new Date(value).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',hour12:false});
@@ -74,18 +75,16 @@
     const nextLine = next != null ? `<p class="form-helper alarm-next">${next ? `本时段下次提醒 · ${fullDate(next)} ${time(next)}` : '目前没有待提醒安排。已记录、暂停、归档或已结束的安排不会提醒。'}</p>` : '';
     const volume = Number.isFinite(nativeAlarm.alarmVolume) ? `<div><span>系统闹钟音量<small>${nativeAlarm.alarmVolume===0?'当前为静音，请先调整':`${nativeAlarm.alarmVolume} / ${nativeAlarm.maxAlarmVolume}`}</small></span><button type="button" data-alarm-access="sound">声音设置</button></div>` : '';
     const checks = [nativeAlarm.backgroundRestricted?'系统限制了药记的后台运行，请在应用设置中检查电池限制。':'',nativeAlarm.powerSave?'当前已开启省电模式，请在此状态下做一次锁屏测试。':'',nativeAlarm.interruptionFilter>1?'勿扰模式已开启，请确认系统允许闹钟出声。':''].filter(Boolean);
-    const snoozed = (nativeAlarm.snoozed || []).filter(item=>!slot || item.slot===slot);
-    return `<div class="alarm-permissions"><div><span>用药闹钟通知<small>显示提醒与操作按钮</small></span>${nativeAlarm.notifications?'<strong>已允许</strong>':'<button type="button" data-alarm-access="notifications">允许通知</button>'}</div><div><span>准时闹钟<small>允许系统按时间触发提醒</small></span>${nativeAlarm.exact?'<strong>已允许</strong>':'<button type="button" data-alarm-access="exact">允许准时闹钟</button>'}</div>${volume}</div>${nextLine}${checks.length?`<div class="device-check-note">${checks.map(text=>`<p>${text}</p>`).join('')}<button type="button" class="text-button" data-alarm-access="app">打开应用系统设置</button></div>`:''}${snoozed.length?`<p class="form-helper">已延后：${snoozed.map(item=>`${slotNames[item.slot]} ${time(item.at)}`).join('、')}。完成记录或停止该药安排后自动取消。</p>`:''}${nativeAlarm.error?`<p class="form-error">${escape(nativeAlarm.error)}</p>`:''}`;
+    return `<div class="alarm-permissions"><div><span>用药闹钟通知<small>显示提醒与操作按钮</small></span>${nativeAlarm.notifications?'<strong>已允许</strong>':'<button type="button" data-alarm-access="notifications">允许通知</button>'}</div><div><span>准时闹钟<small>允许系统按时间触发提醒</small></span>${nativeAlarm.exact?'<strong>已允许</strong>':'<button type="button" data-alarm-access="exact">允许准时闹钟</button>'}</div>${volume}</div>${nextLine}${checks.length?`<div class="device-check-note">${checks.map(text=>`<p>${text}</p>`).join('')}<button type="button" class="text-button" data-alarm-access="app">打开应用系统设置</button></div>`:''}${nativeAlarm.error?`<p class="form-error">${escape(nativeAlarm.error)}</p>`:''}`;
   }
   function alarmBanner() {
     if (alarmError) return `<div class="alarm-notice warning"><span>${escape(alarmError)}</span><button id="reset-alarms">重置闹钟</button></div>`;
-    if (nativeAlarm.ringing) return `<div class="alarm-notice"><span>${nativeAlarm.error?escape(nativeAlarm.error):'用药闹钟正在响铃'}</span><div class="alarm-banner-actions">${nativeAlarm.canSnooze?'<button id="snooze-alarm">稍后 10 分钟</button>':''}<button id="stop-alarm">停止响铃</button></div></div>`;
+    if (nativeAlarm.ringing) return `<div class="alarm-notice"><span>${nativeAlarm.error?escape(nativeAlarm.error):'用药闹钟正在响铃'}</span><div class="alarm-banner-actions"><button id="stop-alarm">停止响铃</button></div></div>`;
     if (nativeAlarm.testScheduled || nativeAlarm.testResult==='awaiting') return '<div class="alarm-notice"><span>锁屏试响进行中，请在提醒设置中确认结果</span><button id="alarm-settings">查看测试</button></div>';
     if (!slots.some(slot=>alarmSettings[slot].enabled)) return '';
     const message = !nativeAlarm.supported?'后台提醒需使用安卓安装版':nativeAlarm.alarmVolume===0?'闹钟音量为 0，请调整音量':!nativeAlarm.ready?(nativeAlarm.error || '提醒待就绪，请检查系统授权'):'';
     if (message) return `<div class="alarm-notice warning"><span>${escape(message)}</span><button id="alarm-settings">查看设置</button></div>`;
-    const deferred=(nativeAlarm.snoozed || []).slice().sort((a,b)=>a.at-b.at);
-    return deferred.length?`<div class="alarm-notice"><span>稍后提醒已安排 · ${time(deferred[0].at)}</span><button id="alarm-settings">查看</button></div>`:'';
+    return '';
   }
   function alarmButton(slot) {
     const alarm = alarmSettings[slot];
@@ -113,12 +112,12 @@
     } catch (error) { showError(error); }
   }
   function alarmOverview() {
-    sheet('用药提醒', `<p class="form-helper">这里设置各时段的默认时间与开关。药品的独立时间优先使用，开关同时控制该时段内的所有药品。</p><div class="setting-group">${slots.map(slot=>`<div class="reminder-overview-row"><button class="setting-row" data-alarm="${slot}">${icon(slot)}<span>${slotNames[slot]}<small>默认 ${alarmSettings[slot].time}</small></span>${icon('chevron')}</button><button type="button" class="home-alarm-switch ${alarmSettings[slot].enabled?(nativeAlarm.ready?'is-on':'is-pending'):''}" role="switch" aria-checked="${alarmSettings[slot].enabled}" aria-label="${slotNames[slot]}提醒开关" data-alarm-toggle="${slot}"><span aria-hidden="true"></span></button></div>`).join('')}</div><div id="alarm-system-status">${alarmSystemStatus()}</div>${alarmTestPanel()}<p class="form-helper">正常提醒最多响铃 1 分钟，可停止或延后 10 分钟。延后仅对当日、仍未记录的原安排有效。</p>`, {type:'alarms'});
+    sheet('用药提醒', `<p class="form-helper">这里设置各时段的默认时间与开关。药品的独立时间优先使用，开关同时控制该时段内的所有药品。</p><div class="setting-group">${slots.map(slot=>`<div class="reminder-overview-row"><button class="setting-row" data-alarm="${slot}">${icon(slot)}<span>${slotNames[slot]}<small>默认 ${alarmSettings[slot].time}</small></span>${icon('chevron')}</button><button type="button" class="home-alarm-switch ${alarmSettings[slot].enabled?(nativeAlarm.ready?'is-on':'is-pending'):''}" role="switch" aria-checked="${alarmSettings[slot].enabled}" aria-label="${slotNames[slot]}提醒开关" data-alarm-toggle="${slot}"><span aria-hidden="true"></span></button></div>`).join('')}</div><div id="alarm-system-status">${alarmSystemStatus()}</div>${alarmTestPanel()}<p class="form-helper">正常提醒最多响铃 1 分钟。通知提供「停止响铃」和「打开药记」两个按钮。</p>`, {type:'alarms'});
   }
   function alarmForm(slot) {
     if (!slots.includes(slot)) return;
     const alarm=alarmSettings[slot];
-    sheet(`${slotNames[slot]}提醒`, `<form id="alarm-form"><p class="alarm-form-state">当前${alarm.enabled?'已开启':'已关闭'} · 开关可在首页或提醒列表操作</p><div class="alarm-time-field"><div class="time-picker-caption"><span id="time-picker-label">本时段默认时间</span><small>24 小时制</small></div><div id="alarm-time-picker" class="time-picker" role="group" aria-labelledby="time-picker-label"></div><input type="hidden" name="time" value="${alarm.time}"><p class="time-picker-help">上下滑动选择，中间高亮为选中时间</p></div><p class="form-helper">使用独立时间的药品不受此时间调整影响。当日时间已过时，从下次安排开始。</p><p class="form-error" id="form-error" role="alert" hidden></p><button type="submit" class="primary-button">保存时间</button></form><div id="alarm-system-status" class="alarm-system-status">${alarmSystemStatus(slot)}</div>${alarmTestPanel()}`, {type:'alarm',slot});
+    sheet(`${slotNames[slot]}提醒`, `<form id="alarm-form"><p class="alarm-form-state">当前${alarm.enabled?'已开启':'已关闭'} · 开关可在首页或提醒列表操作</p><div class="alarm-time-field"><div class="time-picker-caption"><span id="time-picker-label">本时段默认时间</span><small>24 小时制</small></div><div id="alarm-time-picker" class="time-picker" role="group" aria-labelledby="time-picker-label"></div><input type="hidden" name="time" value="${alarm.time}"><p class="time-picker-help" id="time-picker-help">上下滑动选择，中间高亮为选中时间</p></div><p class="form-helper">使用独立时间的药品不受此时间调整影响。当日时间已过时，从下次安排开始。</p><p class="form-error" id="form-error" role="alert" hidden></p><button type="submit" class="primary-button">保存时间</button></form><div id="alarm-system-status" class="alarm-system-status">${alarmSystemStatus(slot)}</div>${alarmTestPanel()}`, {type:'alarm',slot});
     const field=$('#alarm-form [name="time"]');
     alarmPicker=window.MedTimePicker.mount($('#alarm-time-picker'),{value:alarm.time,disabled:false,onChange:value=>{field.value=value;}});
   }
@@ -238,11 +237,13 @@
     tab = next; render(); window.scrollTo({top:0,behavior:'instant'});
   }
   function closeModal() {
+    closeMedicationTime(false);
     if (alarmPicker) { alarmPicker.destroy(); alarmPicker = null; }
     $('#dialog-root').innerHTML = ''; modal = null; document.body.style.overflow = '';
     if ((previousFocus && previousFocus.isConnected)) previousFocus.focus({preventScroll:true});
   }
   function sheet(title, body, context = {}) {
+    closeMedicationTime(false);
     clearToast();
     if (alarmPicker) { alarmPicker.destroy(); alarmPicker = null; }
     if (!modal) previousFocus = document.activeElement;
@@ -328,7 +329,7 @@
   function scheduleForm(id, guided=false) {
     const med=data.medications.find(m=>m.id===id); if (!med) return;
     const schedule=med.schedule, custom=Object.keys(schedule.times).length>0, initial=guided && schedule.mode==='none';
-    sheet(guided?'设置你的用药安排':'用药安排', `${guided?setupSteps(2):''}<p class="schedule-med-name">${escape(medicineLabel(med))}</p>${med.status!=='active'?`<p class="form-helper">该药${med.status==='archived'?'已归档':'已暂停'}，修改安排不会自动恢复提醒。</p>`:''}<form id="schedule-form"><label class="form-field"><span>重复周期</span><select class="field-control" name="mode" required>${initial?'<option value="" disabled selected>选择你的实际频率</option>':''}${[['none','不安排固定频率'],['daily','每天'],['interval','每隔几天'],['weekly','每周指定日期']].map(([value,label])=>`<option value="${value}" ${!initial && schedule.mode===value?'selected':''}>${label}</option>`).join('')}</select></label><div id="interval-fields"><label class="form-field"><span>每隔几天</span><input class="field-control" name="intervalDays" type="number" min="2" max="365" step="1" value="${schedule.intervalDays}" required></label></div><fieldset id="weekday-fields" class="choice-field"><legend>星期</legend><div class="weekday-options">${['一','二','三','四','五','六','日'].map((label,i)=>`<label class="choice-chip"><input type="checkbox" name="weekdays" value="${i+1}" ${schedule.weekdays.includes(i+1)?'checked':''}><span>周${label}</span></label>`).join('')}</div></fieldset><div id="active-schedule-fields"><fieldset class="choice-field"><legend>用药时段 <small>按实际安排选择</small></legend><div class="slot-options">${slots.map(slot=>`<label class="choice-chip slot-chip"><input type="checkbox" name="slots" value="${slot}" ${schedule.slots.includes(slot)?'checked':''}><span>${icon(slot)}${slotNames[slot]}</span></label>`).join('')}</div><p id="slot-count" class="form-helper" aria-live="polite"></p></fieldset><fieldset class="choice-field"><legend>提醒时间</legend><div class="timing-options"><label class="choice-chip"><input type="radio" name="timing" value="shared" ${custom?'':'checked'}><span>跟随时段默认时间</span></label><label class="choice-chip"><input type="radio" name="timing" value="custom" ${custom?'checked':''}><span>这款药使用独立时间</span></label></div></fieldset><div id="med-time-fields">${slots.map(slot=>`<label class="form-field med-time-row" data-med-time="${slot}"><span>${slotNames[slot]}</span><input class="field-control" type="time" step="60" name="time-${slot}" value="${schedule.times[slot] || alarmSettings[slot].time}" required aria-label="${slotNames[slot]}独立时间"></label>`).join('')}</div><p class="form-helper" id="shared-times-hint"></p><p class="form-helper">首页时段开关控制该时段内的所有提醒；独立时间只改变这款药的时间。</p><div class="date-pair"><label class="form-field"><span>开始日期</span><input class="field-control" type="date" name="startDate" value="${schedule.mode==='none'?S.localDay(new Date()):schedule.startDate}" required></label><label class="form-field"><span>结束日期 <small>选填</small></span><input class="field-control" type="date" name="endDate" value="${schedule.endDate || ''}"></label></div><p class="form-helper">结束日期当天仍按计划安排，之后停止提醒并保留记录。留空表示暂不设结束日期。</p></div><p class="form-helper" id="no-schedule-hint">不生成固定安排，仍可通过「补记用药」记录。</p><p class="form-error" id="form-error" role="alert" hidden></p><button type="submit" class="primary-button">${guided?'保存并检查提醒':'保存安排'}</button></form>`, {type:'schedule',id,guided});
+    sheet(guided?'设置你的用药安排':'用药安排', `${guided?setupSteps(2):''}<p class="schedule-med-name">${escape(medicineLabel(med))}</p>${med.status!=='active'?`<p class="form-helper">该药${med.status==='archived'?'已归档':'已暂停'}，修改安排不会自动恢复提醒。</p>`:''}<form id="schedule-form"><label class="form-field"><span>重复周期</span><select class="field-control" name="mode" required>${initial?'<option value="" disabled selected>选择你的实际频率</option>':''}${[['none','不安排固定频率'],['daily','每天'],['interval','每隔几天'],['weekly','每周指定日期']].map(([value,label])=>`<option value="${value}" ${!initial && schedule.mode===value?'selected':''}>${label}</option>`).join('')}</select></label><div id="interval-fields"><label class="form-field"><span>每隔几天</span><input class="field-control" name="intervalDays" type="number" min="2" max="365" step="1" value="${schedule.intervalDays}" required></label></div><fieldset id="weekday-fields" class="choice-field"><legend>星期</legend><div class="weekday-options">${['一','二','三','四','五','六','日'].map((label,i)=>`<label class="choice-chip"><input type="checkbox" name="weekdays" value="${i+1}" ${schedule.weekdays.includes(i+1)?'checked':''}><span>周${label}</span></label>`).join('')}</div></fieldset><div id="active-schedule-fields"><fieldset class="choice-field"><legend>用药时段 <small>按实际安排选择</small></legend><div class="slot-options">${slots.map(slot=>`<label class="choice-chip slot-chip"><input type="checkbox" name="slots" value="${slot}" ${schedule.slots.includes(slot)?'checked':''}><span>${icon(slot)}${slotNames[slot]}</span></label>`).join('')}</div><p id="slot-count" class="form-helper" aria-live="polite"></p></fieldset><fieldset class="choice-field"><legend>提醒时间</legend><div class="timing-options"><label class="choice-chip"><input type="radio" name="timing" value="shared" ${custom?'':'checked'}><span>跟随时段默认时间</span></label><label class="choice-chip"><input type="radio" name="timing" value="custom" ${custom?'checked':''}><span>这款药使用独立时间</span></label></div></fieldset><div id="med-time-fields">${slots.map(slot=>`<div class="form-field med-time-row" data-med-time="${slot}"><span>${slotNames[slot]}</span><button type="button" class="field-control med-time-button" data-pick-med-time="${slot}" aria-haspopup="dialog" aria-label="设置${slotNames[slot]}独立时间，${schedule.times[slot] || alarmSettings[slot].time}"><span data-med-time-value>${schedule.times[slot] || alarmSettings[slot].time}</span>${icon('chevron')}</button><input type="hidden" name="time-${slot}" value="${schedule.times[slot] || alarmSettings[slot].time}"></div>`).join('')}</div><p class="form-helper" id="shared-times-hint"></p><p class="form-helper">首页时段开关控制该时段内的所有提醒；独立时间只改变这款药的时间。</p><div class="date-pair"><label class="form-field"><span>开始日期</span><input class="field-control" type="date" name="startDate" value="${schedule.mode==='none'?S.localDay(new Date()):schedule.startDate}" required></label><label class="form-field"><span>结束日期 <small>选填</small></span><input class="field-control" type="date" name="endDate" value="${schedule.endDate || ''}"></label></div><p class="form-helper">结束日期当天仍按计划安排，之后停止提醒并保留记录。留空表示暂不设结束日期。</p></div><p class="form-helper" id="no-schedule-hint">不生成固定安排，仍可通过「补记用药」记录。</p><p class="form-error" id="form-error" role="alert" hidden></p><button type="submit" class="primary-button">${guided?'保存并检查提醒':'保存安排'}</button></form>`, {type:'schedule',id,guided});
     updateScheduleForm();
   }
   function updateScheduleForm() {
@@ -340,13 +341,40 @@
     $('#no-schedule-hint').hidden=mode!=='none';
     const selected=[...form.querySelectorAll('[name="slots"]:checked')].map(input=>input.value), custom=form.elements.timing.value==='custom';
     $('#slot-count').textContent=selected.length?`每个安排用药的日期记录 ${selected.length} 次`:'请选择至少一个时段';
-    form.querySelectorAll('[data-med-time]').forEach(row=>{const show=active && custom && selected.includes(row.dataset.medTime); row.hidden=!show; row.querySelector('input').disabled=!show;});
+    form.querySelectorAll('[data-med-time]').forEach(row=>{const show=active && custom && selected.includes(row.dataset.medTime); row.hidden=!show; row.querySelector('input').disabled=!show; row.querySelector('button').disabled=!show;});
     $('#shared-times-hint').hidden=!active || custom;
     $('#shared-times-hint').textContent=selected.map(slot=>`${slotNames[slot]} ${alarmSettings[slot].time}`).join(' · ');
     form.elements.endDate.min=form.elements.startDate.value;
   }
+  function openMedicationTime(slot) {
+    if (!slots.includes(slot) || medTimeDialog) return;
+    const form=$('#schedule-form'), field=form && form.elements['time-'+slot];
+    const trigger=form && $(`[data-pick-med-time="${slot}"]`,form);
+    if (!field || field.disabled || !trigger) return;
+    const parent=form.closest('.sheet'), overlay=document.createElement('div');
+    overlay.className='modal-overlay med-time-overlay';
+    overlay.innerHTML=`<section class="sheet med-time-sheet" role="dialog" aria-modal="true" aria-labelledby="med-time-title" tabindex="-1"><header class="sheet-header"><h2 id="med-time-title">${slotNames[slot]}独立时间</h2><button type="button" class="icon-button close-button" data-med-time-cancel aria-label="关闭时间选择">${icon('close')}</button></header><div class="time-picker-caption"><span>选择提醒时间</span><small>24 小时制</small></div><div id="med-time-picker" class="time-picker" role="group" aria-label="独立提醒时间"></div><p class="time-picker-help" id="time-picker-help">小时、分钟分别上下滑动，中间高亮为选中时间</p><div class="button-row"><button type="button" class="secondary-button" data-med-time-cancel>取消</button><button type="button" class="primary-button" data-med-time-confirm>确定时间</button></div></section>`;
+    $('#dialog-root').append(overlay);
+    const panel=$('.sheet',overlay);
+    medTimeDialog={slot,field,trigger,parent,overlay,panel,picker:window.MedTimePicker.mount($('#med-time-picker'),{value:field.value,onChange:()=>{}})};
+    panel.focus({preventScroll:true}); parent.inert=true; parent.setAttribute('aria-hidden','true');
+    requestAnimationFrame(()=>{if (medTimeDialog && medTimeDialog.panel===panel) panel.focus({preventScroll:true});});
+  }
+  function closeMedicationTime(apply) {
+    if (!medTimeDialog) return;
+    const current=medTimeDialog; medTimeDialog=null;
+    if (apply) {
+      const value=current.picker.value();
+      current.field.value=value;
+      $('[data-med-time-value]',current.trigger).textContent=value;
+      current.trigger.setAttribute('aria-label',`设置${slotNames[current.slot]}独立时间，${value}`);
+    }
+    current.picker.destroy(); current.overlay.remove();
+    current.parent.removeAttribute('aria-hidden'); current.parent.inert=false;
+    if (current.trigger.isConnected) current.trigger.focus({preventScroll:true});
+  }
   function settings() {
-    sheet('设置', `<div class="setting-group"><button class="setting-row" id="manage-meds">${icon('pill')}<span>药品管理<small>添加药品、修改信息、暂停与归档</small></span>${icon('chevron')}</button></div><div class="setting-group"><button class="setting-row" id="export-data">${icon('download')}<span>导出备份<small>保存全部药品与用药记录</small></span>${icon('chevron')}</button><button class="setting-row" id="import-data">${icon('upload')}<span>导入备份<small>合并记录，保留已有数据</small></span>${icon('chevron')}</button></div><p class="privacy-note">数据仅保存在这台设备上，无需登录。卸载应用或清理应用数据会移除记录，建议定期导出备份。备份文件含用药记录，请妥善保存。</p><p class="version-note">药记 1.7.0 · 记录每一次用药</p>`, {type:'settings'});
+    sheet('设置', `<div class="setting-group"><button class="setting-row" id="manage-meds">${icon('pill')}<span>药品管理<small>添加药品、修改信息、暂停与归档</small></span>${icon('chevron')}</button></div><div class="setting-group"><button class="setting-row" id="export-data">${icon('download')}<span>导出备份<small>保存全部药品与用药记录</small></span>${icon('chevron')}</button><button class="setting-row" id="import-data">${icon('upload')}<span>导入备份<small>合并记录，保留已有数据</small></span>${icon('chevron')}</button></div><p class="privacy-note">数据仅保存在这台设备上，无需登录。卸载应用或清理应用数据会移除记录，建议定期导出备份。备份文件含用药记录，请妥善保存。</p><p class="version-note">药记 1.7.1 · 记录每一次用药</p>`, {type:'settings'});
     $('.setting-group').insertAdjacentHTML('afterbegin', `<button class="setting-row" id="schedule-settings">${icon('calendar')}<span>用药安排<small>周期、独立时间与疗程</small></span>${icon('chevron')}</button>`);
     $('.setting-group').insertAdjacentHTML('afterbegin', `<button class="setting-row" id="alarm-settings">${icon('alarm')}<span>用药提醒<small>时段开关、系统授权与锁屏试响</small></span>${icon('chevron')}</button>`);
     $('.privacy-note').insertAdjacentHTML('beforebegin', `<div class="setting-group"><button class="setting-row" id="sponsor-developer">${icon('heart')}<span>赞助开发者<small>支持药记的开发与维护</small></span>${icon('chevron')}</button></div>`);
@@ -430,7 +458,7 @@
   }
   function alarmTestPanel() {
     const supported=nativeAlarm.supported;
-    return `<section class="alarm-test-panel"><h3>在这台手机上检查提醒</h3><p class="form-helper">先试听铃声，再安排一次锁屏试响。试响约 5 秒，不会新增用药记录。</p><div class="button-row"><button class="secondary-button" type="button" id="test-alarm" ${supported?'':'disabled'}>立即试听（5 秒）</button><button class="secondary-button" type="button" id="schedule-test" ${supported?'':'disabled'}>1 分钟后锁屏试响</button></div><div id="alarm-test-status">${alarmTestStatus()}</div><div class="button-row"><button class="secondary-button" type="button" id="stop-alarm" ${supported?'':'disabled'}>停止响铃</button>${nativeAlarm.canSnooze?'<button class="secondary-button" type="button" id="snooze-alarm">稍后 10 分钟提醒</button>':''}</div></section>`;
+    return `<section class="alarm-test-panel"><h3>在这台手机上检查提醒</h3><p class="form-helper">先试听铃声，再安排一次锁屏试响。试响约 5 秒，不会新增用药记录。</p><div class="button-row"><button class="secondary-button" type="button" id="test-alarm" ${supported?'':'disabled'}>立即试听（5 秒）</button><button class="secondary-button" type="button" id="schedule-test" ${supported?'':'disabled'}>1 分钟后锁屏试响</button></div><div id="alarm-test-status">${alarmTestStatus()}</div><div class="button-row"><button class="secondary-button" type="button" id="stop-alarm" ${supported?'':'disabled'}>停止响铃</button></div></section>`;
   }
   function reminderGuideState(id) {
     const med=data.medications.find(m=>m.id===id); if (!med) return '';
@@ -454,8 +482,12 @@
 
   document.addEventListener('click', event => {
     const target = event.target.closest('button,a');
+    if (event.target.classList.contains('med-time-overlay')) { closeMedicationTime(false); return; }
     if (event.target.classList.contains('modal-overlay')) { closeModal(); return; }
     if (!target) return;
+    if (target.hasAttribute('data-med-time-cancel')) { closeMedicationTime(false); return; }
+    if (target.hasAttribute('data-med-time-confirm')) { closeMedicationTime(true); return; }
+    if (target.dataset.pickMedTime) { openMedicationTime(target.dataset.pickMedTime); return; }
     if (target.matches('.brand')) { event.preventDefault(); switchTab('today'); return; }
     if (target.hasAttribute('data-close')) { closeModal(); return; }
     if (target.dataset.tab) { switchTab(target.dataset.tab); return; }
@@ -529,14 +561,6 @@
         break;
       }
       case 'cancel-test': if (alarmBridge()) { alarmBridge().cancelAlarmTest(); refreshAlarmStatus(); } break;
-      case 'snooze-alarm': {
-        try {
-          const result=JSON.parse(alarmBridge().snoozeAlarm());
-          if (!result.ok) throw new Error(result.error || '稍后提醒未能保存');
-          refreshAlarmStatus(); toast('已延后 10 分钟，用药记录未改变');
-        } catch (error) { showError(error); }
-        break;
-      }
       case 'reset-alarms':
         try { alarmSettings = R.save(R.defaults()); alarmError = ''; render(); toast('闹钟已重置为关闭，用药记录保留'); } catch (error) { showError(error); }
         break;
@@ -655,16 +679,20 @@
   });
   document.addEventListener('keydown', event => {
     if (!modal) return;
+    if (event.key === 'Escape' && medTimeDialog) { event.preventDefault(); closeMedicationTime(false); return; }
     if (event.key === 'Escape') { event.preventDefault(); closeModal(); }
     if (event.key === 'Tab') {
-      const focusable = [...document.querySelectorAll('.sheet button,.sheet input,.sheet select,.sheet textarea,.sheet [tabindex="0"]')].filter(el => !el.disabled && !el.hidden && el.tabIndex >= 0 && el.getClientRects().length);
+      const panel=medTimeDialog ? medTimeDialog.panel : $('.sheet');
+      if (!panel) return;
+      const focusable = [...panel.querySelectorAll('button,input,select,textarea,[tabindex="0"]')].filter(el => !el.disabled && !el.hidden && el.tabIndex >= 0 && el.getClientRects().length);
       const first = focusable[0], last = focusable[focusable.length - 1];
       if (!first) return;
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === $('.sheet'))) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === $('.sheet'))) { event.preventDefault(); first.focus(); }
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel)) { event.preventDefault(); first.focus(); }
     }
   });
   window.MedtimeNativeBack = () => {
+    if (medTimeDialog) { closeMedicationTime(false); return true; }
     if (modal) { closeModal(); return true; }
     if (tab !== 'today') { switchTab('today'); return true; }
     return false;

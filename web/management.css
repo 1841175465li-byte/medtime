@@ -14,6 +14,8 @@
 .slot-options{grid-template-columns:repeat(2,minmax(0,1fr))}.weekday-options .choice-chip span{padding:9px 2px;font-size:13px}
 .timing-options{display:grid;gap:9px}.timing-options .choice-chip span{justify-content:flex-start;min-height:46px;padding:10px 12px}
 .med-time-row{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:12px;margin:0 0 12px}.med-time-row>span{margin:0}.med-time-row input{min-width:0;font-variant-numeric:tabular-nums}
+.med-time-button{display:flex;align-items:center;justify-content:space-between;text-align:left;font-size:17px;font-variant-numeric:tabular-nums;cursor:pointer}.med-time-button svg{width:18px;height:18px;color:var(--muted)}
+.med-time-overlay{z-index:30}.med-time-sheet{max-width:420px}.med-time-sheet .button-row{margin-top:20px}.med-time-sheet .time-picker-help{line-height:1.8}
 .date-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.date-pair input{min-width:0}
 .med-strength{overflow-wrap:anywhere;color:#586c62!important}.med-state-label{color:#856624!important}
 .medicine-lifecycle{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}.medicine-lifecycle h3{font-size:16px;margin:0 0 10px}.medicine-lifecycle p{font-size:14px;color:var(--muted);line-height:1.7}.lifecycle-archive{display:flex;margin:6px auto 0;color:#846a46}

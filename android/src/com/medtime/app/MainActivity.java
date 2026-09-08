@@ -179,7 +179,7 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public String scheduleAlarmTest() { return AlarmScheduler.scheduleTest(MainActivity.this).toString(); }
         @JavascriptInterface public void cancelAlarmTest() { AlarmScheduler.cancelTest(MainActivity.this); runOnUiThread(MainActivity.this::reportAlarmStatus); }
         @JavascriptInterface public String confirmAlarmTest(boolean heard) { return AlarmScheduler.confirmTest(MainActivity.this,heard).toString(); }
-        @JavascriptInterface public String snoozeAlarm() { return AlarmScheduler.snooze(MainActivity.this).toString(); }
+
         @JavascriptInterface public void requestAlarmAccess(String kind) { runOnUiThread(() -> requestAlarmAccessOnUi(kind)); }
         @JavascriptInterface public void saveFile(String text, String filename, String mime) {
             if (text == null || text.length() > MAX_BACKUP_BYTES) {

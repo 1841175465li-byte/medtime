@@ -142,10 +142,4 @@ public final class AlarmPlan {
             && !deliveryKey(previous,zone).equals(delivered)
             && !pending(slot,alarm,meds,done,previous,zone).isEmpty();
     }
-    public static boolean snoozeEligible(String slot, Alarm alarm, List<Medicine> meds, Set<String> done,
-            long original, long fireAt, ZoneId zone) {
-        return original > 0 && fireAt >= original
-            && Instant.ofEpochMilli(original).atZone(zone).toLocalDate().equals(Instant.ofEpochMilli(fireAt).atZone(zone).toLocalDate())
-            && !pending(slot,alarm,meds,done,original,zone).isEmpty();
-    }
 }

@@ -40,16 +40,7 @@ public final class AlarmManagementTest {
         check(!AlarmPlan.scheduledOn(course,LocalDate.parse("2025-07-13")),"course stops following day");
         equal(next("morning",ON,Arrays.asList(course),"2025-07-12T02:00:00Z",""),0,"no next morning after course ends");
         equal(next("bedtime",bed,Arrays.asList(course),"2025-07-12T02:00:00Z",""),at("2025-07-12T14:45:00Z"),"last bedtime remains scheduled");
-        long origin=at("2025-07-12T01:15:00Z"), later=origin+10*60*1000;
-        check(AlarmPlan.snoozeEligible("morning",ON,both,EMPTY,origin,later,SH),"same-day pending occurrence may be snoozed");
-        Set<String> done=AlarmPlan.completions(Arrays.asList(new AlarmPlan.Dose("a","morning","2025-07-12T01:16:00Z")),SH);
-        check(!AlarmPlan.snoozeEligible("morning",ON,both,done,origin,later,SH),"recording cancels snooze");
-        check(!AlarmPlan.snoozeEligible("morning",new AlarmPlan.Alarm(false,"08:00"),both,EMPTY,origin,later,SH),"switch off cancels snooze");
-        check(!AlarmPlan.snoozeEligible("morning",ON,Arrays.asList(med("a","paused",null,"09:15",null)),EMPTY,origin,later,SH),"pause cancels snooze");
-        check(!AlarmPlan.snoozeEligible("morning",ON,Arrays.asList(med("a","archived",null,"09:15",null)),EMPTY,origin,later,SH),"archive cancels snooze");
-        check(!AlarmPlan.snoozeEligible("morning",ON,Arrays.asList(med("a","active",null,"10:15",null)),EMPTY,origin,later,SH),"time change invalidates old snooze");
-        check(!AlarmPlan.snoozeEligible("morning",ON,both,EMPTY,origin,at("2025-07-13T01:25:00Z"),SH),"never snooze into another day");
-        check(!AlarmPlan.snoozeEligible("morning",ON,both,EMPTY,origin,origin-1,SH),"never snooze earlier than original");
+        long origin=at("2025-07-12T01:15:00Z");
         check(AlarmPlan.keepDue("morning",ON,both,EMPTY,origin,Instant.ofEpochMilli(origin+30*60*1000),SH,""),"refresh retains queued late alarm within delivery window");
         check(!AlarmPlan.keepDue("morning",ON,both,EMPTY,origin,Instant.ofEpochMilli(origin+60*60*1000+1),SH,""),"expired queued alarm is not revived");
         equal(next("morning",ON,both,"2025-07-12T01:15:00Z","2025-07-12T09:15"),at("2025-07-12T02:00:00Z"),"late delivery can chain from original time instead of skipping later doses");
