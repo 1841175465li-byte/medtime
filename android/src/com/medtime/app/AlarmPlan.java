@@ -67,6 +67,20 @@ public final class AlarmPlan {
             this.medicationId=id; this.slot=slot; this.takenAt=Instant.parse(takenAt);
         }
     }
+    public static final class Skip {
+        public final String medicationId, slot;
+        public final LocalDate day;
+        public Skip(String id, String slot, String day) {
+            if (index(slot) < 0 || id == null || !id.matches("[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}")) throw new IllegalArgumentException("跳过安排无效");
+            this.medicationId=id; this.slot=slot; this.day=LocalDate.parse(day);
+            if (this.day.getYear()<1 || this.day.getYear()>9999) throw new IllegalArgumentException("跳过日期无效");
+        }
+    }
+    public static Set<String> resolved(List<Dose> doses, List<Skip> skips, ZoneId zone) {
+        Set<String> done=completions(doses,zone);
+        for (Skip skip:skips) done.add(key(skip.medicationId,skip.slot,skip.day));
+        return done;
+    }
     public static int index(String slot) {
         for (int i=0; i<SLOTS.length; i++) if (SLOTS[i].equals(slot)) return i;
         return -1;

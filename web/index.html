@@ -10,10 +10,13 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="management.css">
+  <link rel="stylesheet" href="accessibility.css">
   <script src="store.js" defer></script>
   <script src="catalog.js" defer></script>
   <script src="reminders.js" defer></script>
   <script src="time-picker.js" defer></script>
+  <script src="preferences.js" defer></script>
+  <script src="backup.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -23,7 +26,7 @@
       <button class="icon-button settings-button" id="settings-button" aria-label="设置"><span data-icon="settings"></span></button>
     </header>
     <div id="storage-alert" role="alert" hidden></div>
-    <main id="main"></main>
+    <main id="main" tabindex="-1"></main>
     <nav class="bottom-nav" aria-label="主导航">
       <button class="nav-item active" data-tab="today" aria-current="page"><span data-icon="calendar"></span><span>今天</span></button>
       <button class="nav-item" data-tab="history"><span data-icon="clock"></span><span>记录</span></button>

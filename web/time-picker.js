@@ -15,7 +15,7 @@
     function publish() { if (!destroyed) options.onChange(currentTime()); }
     root.querySelectorAll('.time-wheel').forEach((element, index) => {
       const items = [...element.children], unit = index ? '分' : '时';
-      const height = items[0].getBoundingClientRect().height;
+      let height = items[0].getBoundingClientRect().height;
       const clamp = value => Math.max(0, Math.min(items.length - 1, value));
       let selected = values[index], timer, holding = false, moved = false, startY = 0;
       function paint(value) {
@@ -86,6 +86,9 @@
       listen('touchstart', onStart); listen('touchmove', onMove);
       listen('touchend', onEnd); listen('touchcancel', onEnd);
       listen('mousedown', onStart); listen('mouseup', onEnd);
+      function resize() { height=items[0].getBoundingClientRect().height; element.scrollTop=selected*height; }
+      window.addEventListener('medtime-layout-changed',resize);
+      cleanups.push(()=>window.removeEventListener('medtime-layout-changed',resize));
       paint(selected);
       element.scrollTop = selected * height;
       wheels.push({element, stop, cancel:() => clearTimeout(timer)});

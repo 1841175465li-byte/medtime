@@ -44,11 +44,13 @@
     // completions, never notes or a full backup. Keep UTC instants for zone changes.
     var cutoff = new Date(now === undefined ? Date.now() : now).getTime() - 48*60*60*1000;
     if (!Number.isFinite(cutoff)) throw new Error('设备时间无效');
-    return {version:2,alarms:validate(alarms),medications:data.medications.map(function (med) {
+    return {version:3,alarms:validate(alarms),medications:data.medications.map(function (med) {
       return {id:med.id,name:med.name,status:med.status,schedule:JSON.parse(JSON.stringify(med.schedule))};
     }),records:data.records.filter(function (record) {
       return slots.indexOf(record.slot) >= 0 && new Date(record.takenAt).getTime() >= cutoff;
-    }).map(function (record) { return {medicationId:record.medicationId,slot:record.slot,takenAt:record.takenAt}; })};
+    }).map(function (record) { return {medicationId:record.medicationId,slot:record.slot,takenAt:record.takenAt}; }),skips:(data.skips || []).filter(function(skip) {
+      return skip.day >= new Date(cutoff-86400000).toISOString().slice(0,10);
+    }).map(function(skip) { return {medicationId:skip.medicationId,slot:skip.slot,day:skip.day}; })};
   }
   return Object.freeze({STORAGE_KEY:STORAGE_KEY,defaults:defaults,validate:validate,load:load,save:save,setAlarm:setAlarm,snapshot:snapshot});
 });

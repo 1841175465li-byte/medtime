@@ -147,7 +147,7 @@ public final class AlarmSoundService extends Service {
             // Testing works without setting a medicine frequency or exact-alarm access.
             if (active.size()==1 && active.containsKey("test")) return;
             AlarmScheduler.Snapshot snapshot=AlarmScheduler.snapshot(this); ZoneId zone=ZoneId.systemDefault();
-            Set<String> done=AlarmPlan.completions(snapshot.doses,zone);
+            Set<String> done=AlarmPlan.resolved(snapshot.doses,snapshot.skips,zone);
             Iterator<Map.Entry<String,Long>> iterator=active.entrySet().iterator();
             while (iterator.hasNext()) {
                 Map.Entry<String,Long> entry=iterator.next();

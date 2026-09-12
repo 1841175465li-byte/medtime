@@ -1,28 +1,28 @@
 /* First-run setup, reminder checks, and medication lifecycle. */
 .welcome-card{padding:24px 20px;background:var(--surface);border:1px solid var(--line);border-radius:16px}
 .welcome-card>svg{width:44px;height:44px;color:var(--green);margin-bottom:16px}
-.welcome-card h2{margin:0 0 10px;font-size:23px;line-height:1.4}
-.welcome-card>p,.welcome-note{color:var(--muted);font-size:14px;line-height:1.8}
+.welcome-card h2{margin:0 0 10px;font-size:1.4375rem;line-height:1.4}
+.welcome-card>p,.welcome-note{color:var(--muted);font-size:0.875rem;line-height:1.8}
 .welcome-list{list-style:none;counter-reset:setup;margin:23px 0;padding:0;display:grid;gap:19px}
 .welcome-list li{counter-increment:setup;position:relative;padding-left:39px;line-height:1.5}
 .welcome-list li:before{content:counter(setup);position:absolute;left:0;top:1px;width:27px;height:27px;border-radius:50%;background:var(--pale);color:var(--green);display:grid;place-items:center;font-weight:650}
-.welcome-list strong,.welcome-list span{display:block}.welcome-list strong{font-size:15px}.welcome-list span{font-size:13px;color:var(--muted);margin-top:4px}
+.welcome-list strong,.welcome-list span{display:block}.welcome-list strong{font-size:0.9375rem}.welcome-list span{font-size:0.8125rem;color:var(--muted);margin-top:4px}
 .welcome-card>.text-button{width:100%;margin-top:9px;color:var(--green)}.welcome-note{text-align:center;padding:0 10px;margin-top:18px}
-.setup-steps{list-style:none;display:flex;gap:8px;padding:0;margin:0 0 23px}.setup-steps li{display:flex;align-items:center;gap:6px;flex:1;font-size:12px;color:var(--muted);white-space:nowrap}
+.setup-steps{list-style:none;display:flex;gap:8px;padding:0;margin:0 0 23px}.setup-steps li{display:flex;align-items:center;gap:6px;flex:1;font-size:0.8125rem;color:var(--muted);white-space:nowrap}
 .setup-steps li>span{display:grid;place-items:center;border-radius:50%;width:22px;height:22px;flex-shrink:0;background:#e9eeeb}.setup-steps li.current{color:var(--green);font-weight:650}.setup-steps .current>span{background:var(--green);color:white}.setup-steps .done>span{background:var(--pale);color:var(--green)}
-.med-view-tabs>button{min-width:0;flex:1;padding:10px 3px;font-size:14px}.med-view-tabs>button>span{font-size:11px;margin-left:3px}
-.slot-options{grid-template-columns:repeat(2,minmax(0,1fr))}.weekday-options .choice-chip span{padding:9px 2px;font-size:13px}
+.med-view-tabs>button{min-width:0;flex:1;padding:10px 3px;font-size:0.875rem}.med-view-tabs>button>span{font-size:0.8125rem;margin-left:3px}
+.slot-options{grid-template-columns:repeat(2,minmax(0,1fr))}.weekday-options .choice-chip span{padding:9px 2px;font-size:0.8125rem}
 .timing-options{display:grid;gap:9px}.timing-options .choice-chip span{justify-content:flex-start;min-height:46px;padding:10px 12px}
 .med-time-row{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:12px;margin:0 0 12px}.med-time-row>span{margin:0}.med-time-row input{min-width:0;font-variant-numeric:tabular-nums}
-.med-time-button{display:flex;align-items:center;justify-content:space-between;text-align:left;font-size:17px;font-variant-numeric:tabular-nums;cursor:pointer}.med-time-button svg{width:18px;height:18px;color:var(--muted)}
+.med-time-button{display:flex;align-items:center;justify-content:space-between;text-align:left;font-size:1.0625rem;font-variant-numeric:tabular-nums;cursor:pointer}.med-time-button svg{width:18px;height:18px;color:var(--muted)}
 .med-time-overlay{z-index:30}.med-time-sheet{max-width:420px}.med-time-sheet .button-row{margin-top:20px}.med-time-sheet .time-picker-help{line-height:1.8}
 .date-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.date-pair input{min-width:0}
 .med-strength{overflow-wrap:anywhere;color:#586c62!important}.med-state-label{color:#856624!important}
-.medicine-lifecycle{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}.medicine-lifecycle h3{font-size:16px;margin:0 0 10px}.medicine-lifecycle p{font-size:14px;color:var(--muted);line-height:1.7}.lifecycle-archive{display:flex;margin:6px auto 0;color:#846a46}
+.medicine-lifecycle{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}.medicine-lifecycle h3{font-size:1rem;margin:0 0 10px}.medicine-lifecycle p{font-size:0.875rem;color:var(--muted);line-height:1.7}.lifecycle-archive{display:flex;margin:6px auto 0;color:#846a46}
 .reminder-overview-row{display:flex;align-items:center;gap:5px;border-bottom:1px solid var(--line);padding-right:13px}.reminder-overview-row:last-child{border-bottom:0}.reminder-overview-row>.setting-row{border:0;flex:1;min-width:0}.reminder-overview-row>.home-alarm-switch{flex-shrink:0}
-.alarm-test-panel{border-top:1px solid var(--line);padding-top:18px;margin:20px 0}.alarm-test-panel h3{font-size:17px;margin:0 0 10px}.alarm-test-panel .button-row{align-items:stretch}.alarm-test-panel .button-row>button{font-size:14px;padding:10px 8px;line-height:1.6;min-width:0}
-.test-result,.reminder-guide-state{border:1px solid #d6e4db;border-radius:12px;padding:16px;background:#eef5f0;margin:16px 0}.test-result strong,.reminder-guide-state strong{font-size:15px;line-height:1.6;display:block}.test-result p,.reminder-guide-state p{font-size:13px;line-height:1.8;margin:8px 0;color:#53665b}.test-result.pending{background:#faf6eb;border-color:#eadfc0}.test-result.success{color:var(--green)}
-.device-check-note{background:#faf6eb;border:1px solid #eadfc0;border-radius:10px;padding:12px;margin:14px 0}.device-check-note p{margin:0 0 6px;font-size:13px;line-height:1.7;color:#76643f}.device-check-note>.text-button{font-size:13px;padding:0}
+.alarm-test-panel{border-top:1px solid var(--line);padding-top:18px;margin:20px 0}.alarm-test-panel h3{font-size:1.0625rem;margin:0 0 10px}.alarm-test-panel .button-row{align-items:stretch}.alarm-test-panel .button-row>button{font-size:0.875rem;padding:10px 8px;line-height:1.6;min-width:0}
+.test-result,.reminder-guide-state{border:1px solid #d6e4db;border-radius:12px;padding:16px;background:#eef5f0;margin:16px 0}.test-result strong,.reminder-guide-state strong{font-size:0.9375rem;line-height:1.6;display:block}.test-result p,.reminder-guide-state p{font-size:0.8125rem;line-height:1.8;margin:8px 0;color:#53665b}.test-result.pending{background:#faf6eb;border-color:#eadfc0}.test-result.success{color:var(--green)}
+.device-check-note{background:#faf6eb;border:1px solid #eadfc0;border-radius:10px;padding:12px;margin:14px 0}.device-check-note p{margin:0 0 6px;font-size:0.8125rem;line-height:1.7;color:#76643f}.device-check-note>.text-button{font-size:0.8125rem;padding:0}
 .alarm-notice{flex-wrap:wrap}.alarm-banner-actions{display:flex;gap:10px;flex-wrap:wrap}.alarm-banner-actions button{min-height:44px}
 .alarm-permissions>div>span{min-width:0}.alarm-permissions small{line-height:1.6}
-@media(max-width:430px){.date-pair{grid-template-columns:1fr;gap:0}.setup-steps{gap:4px}.setup-steps li{gap:4px;font-size:11px}.welcome-card{padding:21px 17px}}
+@media(max-width:430px){.date-pair{grid-template-columns:1fr;gap:0}.setup-steps{gap:4px}.setup-steps li{gap:4px;font-size:0.8125rem}.welcome-card{padding:21px 17px}}

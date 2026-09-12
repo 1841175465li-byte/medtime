@@ -1,0 +1,110 @@
+/* Content follows rem sizing; touch targets remain at least 48 CSS pixels. */
+:root{font-size:16px;--muted:#5f6d66}
+body{line-height:1.6}
+button,.text-button,.record-button,.assign-button,.recorded-button,.home-alarm-switch,.period-alarm-controls .period-alarm,.setting-row,.plan-title .text-button,.history-detail-title .text-button,.med-search-box button,.filter-footer button{min-width:48px;min-height:48px;height:auto;line-height:1.5}
+.icon-button,.settings-button,.row-menu{width:48px;height:48px;margin-right:0}
+.brand{min-height:48px}
+.app-shell{padding-bottom:8rem}
+.app-header{height:auto;min-height:88px;padding:16px 0}
+.page-heading h1{font-size:2rem}
+.page-heading p,.summary{line-height:1.65}
+.summary,.section-title,.med-stats header,.filter-footer{flex-wrap:wrap}
+.summary strong,.summary span,.sheet-header h2{overflow-wrap:anywhere}
+.sheet{padding-bottom:32px;scroll-padding-bottom:24px}
+.sheet-header{align-items:flex-start;gap:8px}
+.sheet-header h2{padding-top:7px;min-width:0}
+.field-control,.history-filters select,.history-filters input,.catalog-filter select{min-height:48px;height:auto;padding:10px 12px;line-height:1.5;max-width:100%;min-width:0}
+.field-control textarea,textarea.field-control{min-height:7rem}
+.choice-chip>span{min-width:48px;min-height:48px;line-height:1.5}
+.weekday-options{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.choice-chip input{width:100%;height:100%;margin:0;inset:0}
+.choice-field,.dose-fields{min-width:0}
+.form-field>span,.choice-field legend{font-size:.9375rem}
+.form-field{min-width:0;max-width:100%}
+.button-row{align-items:stretch;flex-wrap:wrap;gap:10px}
+.button-row>button{padding:12px 10px;min-width:0;overflow-wrap:anywhere}
+.primary-button,.secondary-button{min-height:50px;height:auto;padding:12px 14px;line-height:1.6}
+.setup-steps{flex-wrap:wrap;gap:10px}
+.setup-steps li{white-space:normal;min-width:70px;line-height:1.6}
+.setup-steps li>span{min-width:24px;min-height:24px;width:1.6rem;height:1.6rem}
+.med-time-row{grid-template-columns:minmax(55px,auto) minmax(0,1fr)}
+.med-time-button{font-size:1.125rem}
+.med-time-button svg{margin-left:10px}
+.med-time-sheet .sheet-header h2{font-size:1.25rem}
+.period-header{flex-wrap:wrap;gap:3px}
+.period-progress{margin-left:4px;font-size:.8125rem;white-space:normal}
+.period-alarm-controls{padding-left:0;gap:0}
+.period-alarm-controls .period-alarm{font-size:.875rem;padding:4px}
+.plan-med{align-items:flex-start;gap:8px;padding:16px 0}
+.plan-med-info{margin-right:0}
+.plan-med h3{font-size:1.0625rem}
+.plan-med p{font-size:.8125rem;line-height:1.75}
+.plan-actions{display:flex;flex-direction:column;gap:5px;min-width:84px;flex-shrink:0}
+.plan-actions>button{width:100%;padding:8px;font-size:.875rem}
+.plan-med-info .last-use,.last-use{margin-top:8px;color:#586c62;line-height:1.75;overflow-wrap:anywhere}
+.skip-action{color:#6e6553}
+.skip-button{border:1px solid #cbbd9b;border-radius:8px;color:#725b27;background:#faf5e8}
+.skip-entry{display:flex;gap:12px;align-items:flex-start;padding:15px 12px;margin-top:10px;border-radius:10px;background:#f9f4e9;border:1px solid #e8dfcb}
+.skip-entry>div{flex:1;min-width:0}
+.skip-entry strong{font-size:.9375rem;overflow-wrap:anywhere}
+.skip-entry p{font-size:.8125rem;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 0;color:#6d5c3b}
+.backup-notice{display:flex;gap:12px;align-items:center;justify-content:space-between;border:1px solid #cfded4;border-radius:12px;padding:12px 14px;background:#fff;margin:0 0 20px;font-size:.875rem}
+.backup-notice small{display:block;color:var(--muted);font-size:.8125rem;margin-top:3px}
+.backup-notice button{flex-shrink:0;color:var(--green);padding:8px}
+.backup-status,.reading-preview{background:var(--pale);border:1px solid #cdded2;border-radius:12px;padding:16px;margin:0 0 20px}
+.backup-status h3{font-size:1rem;margin:0 0 8px}
+.backup-status p{font-size:.875rem;line-height:1.8;margin:6px 0}
+.reading-choice{display:flex;align-items:center;gap:12px;min-height:64px;padding:12px 0;cursor:pointer}
+.reading-choice input{appearance:none;-webkit-appearance:none;display:grid;place-items:center;width:48px;height:48px;flex-shrink:0;border:1px solid #a4b6aa;border-radius:12px;background:white;margin:0;color:var(--green)}
+.reading-choice input:checked:before{content:'✓';font-size:1.5rem}
+.reading-choice input:focus-visible{outline:3px solid #8dbbaa}
+.reading-choice small{display:block;font-size:.8125rem;color:var(--muted)}
+.week-summary{background:white;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:24px}
+.week-summary h2{font-size:1.0625rem;margin:0 0 5px}
+.week-summary p{font-size:.8125rem;color:var(--muted);margin:0 0 12px}
+.week-summary table{width:100%;border-collapse:collapse;table-layout:fixed;font-variant-numeric:tabular-nums;font-size:.875rem}
+.week-summary th,.week-summary td{text-align:center;border-top:1px solid var(--line);padding:4px;overflow-wrap:anywhere}
+.week-summary th{font-weight:550}
+.week-summary th:first-child{width:43%;text-align:left}
+.week-summary button{text-align:left;color:var(--green);width:100%;font-size:.875rem}
+.document-copy h3{font-size:1rem;margin:18px 0 7px}
+.document-copy p,.document-copy li,.guide-list li{font-size:.875rem;line-height:1.85;overflow-wrap:anywhere}
+.document-copy ul,.guide-list{padding-left:24px}
+.guide-list li{margin-bottom:15px}
+.document-copy{margin-bottom:24px}
+.app-version{font-size:1.25rem;font-weight:650}
+.feedback-template{min-height:12rem}
+.timeline-time{width:3.4rem;line-height:1.65}
+.timeline-content strong{line-height:1.65}
+.timeline-row{gap:9px}
+.my-med-actions{gap:5px;align-items:stretch}
+.my-med-actions button{white-space:normal;padding:8px}
+.med-search-box input{height:auto;min-height:48px;padding:8px 0;line-height:1.5}
+.med-view-tabs{flex-wrap:wrap;gap:5px}
+.med-view-tabs>button{min-width:66px}
+.reading-large .app-shell{padding-left:16px;padding-right:16px}
+.reading-large .plan-med{flex-direction:column;align-items:stretch}
+.reading-large .plan-actions{flex-direction:row;flex-wrap:wrap;width:100%}
+.reading-large .plan-actions>button{flex:1;width:auto;min-width:90px}
+.reading-large .period-alarm-controls{width:100%;justify-content:space-between}
+.reading-large .history-filters,.reading-large .dose-input-row,.reading-large .date-pair{grid-template-columns:minmax(0,1fr)}
+.reading-large .button-row{flex-direction:column}
+.reading-large .setup-steps{flex-direction:column}
+.reading-large .welcome-list li{padding-left:2.5rem}
+.reading-large .welcome-list li:before{width:1.8rem;height:1.8rem}
+.reading-large .setting-row{padding:14px 10px;gap:8px}
+.reading-large .setting-row>svg:first-child{display:none}
+.reading-large .alarm-permissions>div{flex-wrap:wrap;gap:8px}
+.reading-large .alarm-permissions>div>span{flex-basis:100%}
+.reading-large .alarm-test-panel .button-row>button{width:100%}
+.reading-large .timeline-row{flex-wrap:wrap}
+.reading-large .timeline-time{width:100%}
+.reading-large .time-picker{padding-left:4px;padding-right:4px;grid-template-columns:minmax(0,1fr) 20px minmax(0,1fr)}
+.reading-large .med-time-sheet{padding-left:14px;padding-right:14px}
+.reading-large .time-picker-caption{flex-wrap:wrap;gap:5px}
+.time-wheel-label{line-height:1.6;min-height:1.75rem}
+.reading-large .backup-notice{flex-wrap:wrap}
+.reading-large .catalog-row{flex-wrap:wrap;gap:9px}
+.reading-large .catalog-row>div{flex-basis:100%}
+.reading-large .choice-field legend small{display:block;margin-left:0}
+@media(max-width:360px){.app-shell{padding-left:14px;padding-right:14px}.period-alarm-controls{width:100%;justify-content:space-between}.plan-actions{min-width:80px}.sheet{padding-left:16px;padding-right:16px}.reading-large .med-stats header{display:block}.reading-large .med-stats header>span{display:block;margin-top:7px}}

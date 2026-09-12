@@ -27,9 +27,10 @@
 
   function defaults() {
     return {
-      version: 4,
+      version: 5,
       medications: [],
-      records: []
+      records: [],
+      skips: []
     };
   }
 
@@ -206,8 +207,8 @@
     // Stored timestamps remain valid if the device clock moves backwards. Only
     // imported doses or a newly entered dose time are checked against "now".
     var clock = futureTakenAtClock === undefined ? null : asDate(futureTakenAtClock);
-    object(data, '数据', ['version', 'medications', 'records']);
-    if ([1, 2, 3, 4].indexOf(data.version) < 0) fail('不支持此备份版本');
+    if (data && [1, 2, 3, 4, 5].indexOf(data.version) < 0) fail('不支持此备份版本');
+    object(data, '数据', data && data.version === 5 ? ['version', 'medications', 'records', 'skips'] : ['version', 'medications', 'records']);
     var legacy = data.version === 1;
     var hasDoses = data.version >= 3;
     var extended = data.version >= 4;
@@ -261,7 +262,24 @@
         medicationForm: extended ? detailText(record.medicationForm, '记录剂型') : ''
       };
     });
-    return { version: 4, medications: medications, records: records };
+    var skipIds = new Set(), skipKeys = new Set();
+    var sourceSkips = data.version === 5 ? data.skips : [];
+    if (!Array.isArray(sourceSkips) || sourceSkips.length > MAX_RECORDS) fail('跳过记录最多 20,000 条');
+    var skips = sourceSkips.map(function (skip) {
+      object(skip, '跳过记录', ['id','medicationId','medicationName','medicationStrength','medicationForm','day','slot','reason','createdAt']);
+      var id = identifier(skip.id, '跳过记录'), medicationId = identifier(skip.medicationId, '药品');
+      if (skipIds.has(id) || !medicationIds.has(medicationId)) fail('跳过记录标识重复或药品不存在');
+      skipIds.add(id);
+      var day = calendarDay(skip.day), slot = recordSlot(skip.slot);
+      if (!slot || (clock && day > localDay(clock))) fail('跳过日期或时段无效');
+      var key = medicationId + '|' + day + '|' + slot;
+      if (skipKeys.has(key)) fail('同一天同一时段的跳过记录重复');
+      skipKeys.add(key);
+      return {id:id,medicationId:medicationId,medicationName:medicationName(skip.medicationName),
+        medicationStrength:detailText(skip.medicationStrength,'记录规格'),medicationForm:detailText(skip.medicationForm,'记录剂型'),
+        day:day,slot:slot,reason:skipReason(skip.reason),createdAt:isoDate(skip.createdAt,null,'创建时间')};
+    });
+    return { version: 5, medications: medications, records: records, skips: skips };
   }
 
   function storageOrDefault(storage) {
@@ -347,6 +365,7 @@
       slot: fields.slot,
       dose: fields.dose
     });
+    clearRecordedSkips(clean);
     return clean;
   }
 
@@ -377,6 +396,7 @@
       slot: fields.slot,
       dose: fields.dose
     };
+    clearRecordedSkips(clean);
     return clean;
   }
 
@@ -423,14 +443,14 @@
     var clean = validate(data);
     var byId = new Map();
     var stats = clean.medications.map(function (med) {
-      var result = {medicationId:med.id, name:med.name, icon:med.icon, strength:med.strength, form:med.form, status:med.status, count:0, lastTakenAt:null};
+      var result = {medicationId:med.id, name:med.name, icon:med.icon, strength:med.strength, form:med.form, status:med.status, count:0, lastTakenAt:null, lastDose:null};
       byId.set(med.id, result);
       return result;
     });
     clean.records.forEach(function (record) {
       var item = byId.get(record.medicationId);
       item.count += 1;
-      if (!item.lastTakenAt || new Date(record.takenAt) > new Date(item.lastTakenAt)) item.lastTakenAt = record.takenAt;
+      if (!item.lastTakenAt || new Date(record.takenAt) >= new Date(item.lastTakenAt)) { item.lastTakenAt = record.takenAt; item.lastDose = record.dose; }
     });
     return stats;
   }
@@ -462,6 +482,14 @@
         recordIds.add(item.id);
       }
     });
+    var skipIds = new Set(current.skips.map(function (item) { return item.id; }));
+    var skipKeys = new Set(current.skips.map(skipKey));
+    imported.skips.forEach(function (item) {
+      if (!skipIds.has(item.id) && !skipKeys.has(skipKey(item))) {
+        current.skips.push(item); skipIds.add(item.id); skipKeys.add(skipKey(item));
+      }
+    });
+    clearRecordedSkips(current);
     return validate(current);
   }
 
@@ -529,7 +557,7 @@
       if (medication.status !== 'active' || !scheduledOn(medication.schedule, day)) return;
       groups.forEach(function (group) {
         if (medication.schedule.slots.indexOf(group.slot) >= 0) {
-          group.medications.push({ medication: medication, record: latest.get(medication.id + '|' + group.slot) || null });
+          group.medications.push({ medication: medication, record: latest.get(medication.id + '|' + group.slot) || null, skip: clean.skips.find(function (skip) { return skip.medicationId === medication.id && skip.day === day && skip.slot === group.slot; }) || null });
         }
       });
     });
@@ -551,6 +579,48 @@
     return state + prefix + ' · ' + schedule.slots.map(function (slot) { return SLOT_LABELS[slot] + (schedule.times[slot] ? ' ' + schedule.times[slot] : ''); }).join('、') + (schedule.endDate ? ' · 至 ' + schedule.endDate : '');
   }
 
+  function skipReason(value) {
+    if (typeof value !== 'string' || !value.trim() || value.trim().length > 200) fail('请填写跳过原因，最多 200 个字');
+    return value.trim();
+  }
+  function skipKey(skip) { return skip.medicationId + '|' + skip.day + '|' + skip.slot; }
+  function clearRecordedSkips(clean) {
+    var taken = new Set(clean.records.filter(function(r) { return r.slot; }).map(function(r) { return r.medicationId + '|' + localDay(r.takenAt) + '|' + r.slot; }));
+    clean.skips = clean.skips.filter(function(skip) { return !taken.has(skipKey(skip)); });
+  }
+  function addSkip(data, input, now) {
+    var clean = validate(data), clock = asDate(now === undefined ? new Date() : now);
+    var med = clean.medications.find(function(m) { return m.id === input.medicationId; });
+    var day = calendarDay(input.day), slot = recordSlot(input.slot);
+    if (!med || !slot || day > localDay(clock) || !isScheduledOn(med,day) || med.schedule.slots.indexOf(slot) < 0) fail('请选择当天或过去的有效安排');
+    if (clean.records.some(function(r) { return r.medicationId === med.id && r.slot === slot && localDay(r.takenAt) === day; })) fail('这个时段已记录用药，不能标为跳过');
+    if (clean.skips.some(function(r) { return r.medicationId === med.id && r.slot === slot && r.day === day; })) fail('这次安排已经标为跳过');
+    if (clean.skips.length >= MAX_RECORDS) fail('跳过记录最多 20,000 条');
+    clean.skips.push({id:uniqueId('skip',clean.skips),medicationId:med.id,medicationName:med.name,medicationStrength:med.strength,medicationForm:med.form,
+      day:day,slot:slot,reason:skipReason(input.reason),createdAt:clock.toISOString()});
+    return clean;
+  }
+  function updateSkip(data, id, reason) {
+    var clean = validate(data), skip = clean.skips.find(function(item) { return item.id === id; });
+    if (!skip) fail('这条跳过记录不存在');
+    skip.reason = skipReason(reason); return clean;
+  }
+  function deleteSkip(data, id) {
+    var clean = validate(data);
+    if (!clean.skips.some(function(item) { return item.id === id; })) fail('这条跳过记录不存在');
+    clean.skips = clean.skips.filter(function(item) { return item.id !== id; }); return clean;
+  }
+  function getWeekSummary(data, date, medicationId) {
+    var clean = validate(data), end = planDay(date), rows = [];
+    // Calendar arithmetic avoids DST days with 23 or 25 hours.
+    for (var offset = 6; offset >= 0; offset--) {
+      var day = new Date((dayNumber(end) - offset) * 86400000).toISOString().slice(0,10);
+      rows.push({day:day,records:clean.records.filter(function(r) { return (!medicationId || r.medicationId === medicationId) && localDay(r.takenAt) === day; }).length,
+        skips:clean.skips.filter(function(r) { return (!medicationId || r.medicationId === medicationId) && r.day === day; }).length});
+    }
+    return rows;
+  }
+
   function pad(number) { return String(number).padStart(2, '0'); }
 
   function localDay(value) {
@@ -569,6 +639,10 @@
     load: load,
     save: save,
     addRecord: addRecord,
+    addSkip: addSkip,
+    updateSkip: updateSkip,
+    deleteSkip: deleteSkip,
+    getWeekSummary: getWeekSummary,
     deleteRecord: deleteRecord,
     updateRecord: updateRecord,
     addMedication: addMedication,

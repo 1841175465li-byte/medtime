@@ -35,7 +35,7 @@ function freezeDeep(value) {
 test('first install starts empty; new medication has no suggested schedule or dose', () => {
   const memory = memoryStorage();
   const first = store.load(memory);
-  assert.deepEqual(first, {version:4,medications:[],records:[]});
+  assert.deepEqual(first, {version:5,medications:[],records:[],skips:[]});
   assert.equal(memory.raw(),null);
   const added=store.addMedication(first,'我的药品');
   assert.equal(added.medications[0].dose,null);
@@ -246,20 +246,20 @@ function dose(data, { day = 12, hour = 8, slot = null, medicationId = 'minoxidil
   }, new Date('2025-07-16T12:00:00Z'));
 }
 
-test('v1 load migrates without writing or losing history; next save uses v4 at the same key', () => {
+test('v1 load migrates without writing or losing history; next save uses v5 at the same key', () => {
   const original = legacy(record());
   const memory = memoryStorage(JSON.stringify(original));
   const upgraded = store.load(memory);
   assert.equal(store.STORAGE_KEY, 'medtime.data.v1');
-  assert.equal(upgraded.version, 4);
+  assert.equal(upgraded.version, 5);
   assert.deepEqual(legacy(upgraded), original);
   assert.equal(upgraded.records[0].slot, null);
   assert.ok(upgraded.medications.every(m => m.schedule.mode === 'none'));
   assert.equal(memory.raw(), JSON.stringify(original));
   store.save(upgraded, memory);
-  assert.equal(JSON.parse(memory.raw()).version, 4);
+  assert.equal(JSON.parse(memory.raw()).version, 5);
   assert.deepEqual(store.load(memory), upgraded);
-  assert.equal(JSON.parse(store.exportData(original)).version, 4);
+  assert.equal(JSON.parse(store.exportData(original)).version, 5);
 });
 
 test('inactive migration and defaults are deterministic across midnight and independent', () => {
@@ -285,7 +285,7 @@ test('v1 import merges legacy custom medication and records without replacing an
   const original = legacy(record(custom, { medicationId: custom.medications.at(-1).id, note: '旧版备注保留' }));
   const current = scheduledData({ mode: 'interval', intervalDays: 3 });
   const merged = store.importData(JSON.stringify(original), current);
-  assert.equal(merged.version, 4);
+  assert.equal(merged.version, 5);
   assert.equal(merged.medications.length, 4);
   assert.deepEqual(merged.medications[0].schedule, current.medications[0].schedule);
   assert.equal(merged.medications.at(-1).schedule.mode, 'none');
@@ -455,7 +455,7 @@ test('current backups restore unset schedules but preserve configured schedules,
   const memory = memoryStorage();
   store.save(imported, memory);
   assert.deepEqual(store.load(memory), imported);
-  assert.equal(JSON.parse(store.exportData(imported)).version, 4);
+  assert.equal(JSON.parse(store.exportData(imported)).version, 5);
 });
 
 test('schedule labels describe daily, interval, weekly and unset choices', () => {

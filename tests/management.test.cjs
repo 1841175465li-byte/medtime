@@ -21,7 +21,7 @@ test('real v3 upgrade retains existing names, doses, times and records without a
  before=S.addRecord(before,{medicationId:'minoxidil',takenAt:'2025-07-11T01:30:00Z',slot:'morning',note:'原记录'},now);
  const old=fixture.legacy(before,3), raw=JSON.stringify(old);
  const migrated=S.load({getItem:()=>raw,setItem:()=>assert.fail('read wrote storage')});
- assert.equal(migrated.version,4);
+ assert.equal(migrated.version,5);
  assert.equal(migrated.medications.length,3);
  assert.deepEqual(migrated.medications.map(m=>m.name),old.medications.map(m=>m.name));
  assert.deepEqual(migrated.medications[0].schedule.weekdays,[1,3,5]);
@@ -42,7 +42,7 @@ test('independent times and bedtime survive backup without rewriting the shared 
  assert.deepEqual(S.importData(S.exportData(data),S.defaults()),data);
  assert.equal(JSON.stringify(alarms),original);
  const mirror=R.snapshot(data,alarms,now);
- assert.equal(mirror.version,2);
+ assert.equal(mirror.version,3);
  assert.deepEqual(mirror.medications[0].schedule.times,{morning:'09:15',bedtime:'22:45'});
  assert.equal(mirror.alarms.morning.time,'08:00');
  assert.equal(mirror.alarms.bedtime.enabled,false);

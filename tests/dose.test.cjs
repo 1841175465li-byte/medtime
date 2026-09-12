@@ -70,7 +70,7 @@ test('v1 and v2 migration preserves records and frequency without inferring old 
     const old = fixture.legacy(current,version);
     const raw = JSON.stringify(old);
     const migrated = S.load({getItem:() => raw,setItem:() => {throw new Error('read must not write');}});
-    assert.equal(migrated.version,4);
+    assert.equal(migrated.version,5);
     assert.equal(migrated.records[0].id,current.records[0].id);
     assert.equal(migrated.records[0].dose,null);
     assert.equal(migrated.medications[0].dose,null);

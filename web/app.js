@@ -4,6 +4,8 @@
   const S = window.MedStore;
   const C = window.MedCatalog;
   const R = window.MedReminders;
+  const P=window.MedPreferences, B=window.MedBackup;
+  let preferences=P.defaults(), preferenceError='', exportPending=false;
   const $ = (selector, root = document) => root.querySelector(selector);
   const escape = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const paths = {
@@ -54,6 +56,8 @@
       alert.hidden = false;
       alert.innerHTML = '本地数据暂时无法读取，原始数据已保留。为防止覆盖，暂不能记录。请先导出原始数据保存。<button id="export-raw">导出原始数据</button>';
     }
+    try { preferences=P.load(); } catch (_) { preferenceError='显示与备份设置无法读取，暂用默认值。'; }
+    syncBackupStatus(); applyAppearance();
     try { alarmSettings = R.load(); alarmError = ''; }
     catch (error) { alarmSettings = R.defaults(); alarmError = '闹钟设置无法读取，已暂停提醒。'; }
   }
@@ -151,7 +155,7 @@
     }
     next = S.save(next);
     const previous = data;
-    data = next; render();
+    data = next; rememberChange(); render();
     if (message) toast(message, canUndo ? () => {
       if (data !== next) return;
       try {
@@ -159,54 +163,50 @@
         if (JSON.stringify(current) !== JSON.stringify(next)) {
           data = current; render(); throw new Error('记录已在另一页面更新');
         }
-        S.save(previous); data = previous; render(); toast('已撤销');
+        S.save(previous); data = previous; rememberChange(); render(); toast('已撤销');
       }
       catch (err) { toast(`撤销失败：${err.message}`); }
-    } : null, canUndo ? 4000 : 1000);
+    } : null, canUndo ? 8000 : 1000);
   }
   function timeline(records) {
     return `<div class="timeline-list">${records.map(r => `<article class="timeline-row"><time class="timeline-time" datetime="${escape(r.takenAt)}">${time(r.takenAt)}</time><div class="timeline-content"><strong>${escape(r.medicationName)}</strong><p class="record-slot">${r.slot ? slotNames[r.slot] : '未分时段'}${r.dose ? ` · ${escape(S.getDoseLabel(r.dose))}` : ''}</p>${r.medicationStrength || r.medicationForm ? `<p>${escape([r.medicationStrength,r.medicationForm].filter(Boolean).join(' · '))}</p>` : ''}${r.note ? `<p>${escape(r.note)}</p>` : ''}</div><button class="icon-button row-menu" data-edit="${escape(r.id)}" aria-label="编辑${escape(r.medicationName)} ${time(r.takenAt)}的记录">${icon('more')}</button></article>`).join('')}</div>`;
   }
   function planRow(item, slot, records) {
-    const med=item.medication, record=item.record, unassigned=records.filter(r=>r.medicationId===med.id && !r.slot);
+    const med=item.medication, record=item.record, skip=!record && item.skip, unassigned=records.filter(r=>r.medicationId===med.id && !r.slot);
     let action;
     if (record) action=`<button class="recorded-button" data-edit="${escape(record.id)}" aria-label="编辑${escape(med.name)}${slotNames[slot]}的记录">${icon('check')}<span>已记录<small>${time(record.takenAt)}</small></span></button>`;
-    else if (unassigned.length) action=`<button class="assign-button" data-assign="${escape(med.id)}" data-slot="${slot}" aria-label="关联${escape(med.name)}${slotNames[slot]}的已有记录">关联记录</button>`;
-    else action=`<button class="record-button" data-record="${escape(med.id)}" data-slot="${slot}" aria-label="记录${escape(med.name)}（${slotNames[slot]}）" ${storageBlocked?'disabled':''}>${icon('plus')}<span>记录</span></button>`;
+    else if (skip) action=`<button class="skip-button" data-edit-skip="${escape(skip.id)}" aria-label="查看${escape(med.name)}${slotNames[slot]}的跳过原因">已跳过</button><button class="text-button" data-record="${escape(med.id)}" data-slot="${slot}">补记用药</button>`;
+    else {
+      action=unassigned.length?`<button class="assign-button" data-assign="${escape(med.id)}" data-slot="${slot}" aria-label="关联${escape(med.name)}${slotNames[slot]}的已有记录">关联记录</button>`:`<button class="record-button" data-record="${escape(med.id)}" data-slot="${slot}" aria-label="记录${escape(med.name)}（${slotNames[slot]}）" ${storageBlocked?'disabled':''}>${icon('plus')}<span>记录</span></button>`;
+      action+=`<button class="text-button skip-action" data-skip="${escape(med.id)}" data-slot="${slot}" aria-label="跳过${escape(med.name)}${slotNames[slot]}这次安排" ${storageBlocked?'disabled':''}>本次跳过</button>`;
+    }
     const dose=record?record.dose:med.dose, plannedTime=med.schedule.times[slot] || alarmSettings[slot].time;
     const details=record?[record.medicationStrength,record.medicationForm]:[med.strength,med.form];
-    return `<article class="plan-med ${record?'is-recorded':''}"><div class="plan-med-info"><h3>${escape(med.name)}</h3>${details.some(Boolean)?`<p class="med-strength">${escape(details.filter(Boolean).join(' · '))}</p>`:''}<p>${record?'已记录本时段':`${plannedTime}${med.schedule.times[slot]?' · 独立时间':''}${alarmSettings[slot].enabled?'':' · 提醒关闭'}`}</p>${unassigned.length && !record?`<p>有 ${unassigned.length} 条未分时段记录</p>`:''}${dose?`<p class="plan-dose">${record?'本次':'每次'} ${escape(S.getDoseLabel(dose))}</p>`:''}</div>${action}</article>`;
+    return `<article class="plan-med ${record?'is-recorded':skip?'is-skipped':''}"><div class="plan-med-info"><h3>${escape(med.name)}</h3>${details.some(Boolean)?`<p class="med-strength">${escape(details.filter(Boolean).join(' · '))}</p>`:''}<p>${record?'已记录本时段':skip?'已跳过 · '+escape(skip.reason):`未记录 · ${plannedTime}${med.schedule.times[slot]?' · 独立时间':''}${alarmSettings[slot].enabled?'':' · 提醒关闭'}`}</p>${unassigned.length && !record && !skip?`<p>有 ${unassigned.length} 条未分时段记录</p>`:''}${dose?`<p class="plan-dose">${record?'本次':'每次'} ${escape(S.getDoseLabel(dose))}</p>`:''}<p class="last-use">${escape(lastUseText(med.id))}</p></div><div class="plan-actions">${action}</div></article>`;
   }
   function renderToday() {
     if (!data.medications.length && !storageBlocked) return welcome();
     const records=todayRecords(), plan=S.getDayPlan(data,new Date());
     const total=plan.reduce((n,g)=>n+g.medications.length,0), completed=plan.reduce((n,g)=>n+g.medications.filter(i=>i.record).length,0);
+    const skipped=plan.reduce((n,g)=>n+g.medications.filter(i=>!i.record && i.skip).length,0);
     const unset=data.medications.filter(m=>m.status==='active' && m.schedule.mode==='none').length;
-    return `<section class="page-heading"><h1>今天</h1><p>${dateLabel(new Date())}</p></section><div class="summary"><strong>今日安排</strong><span>${total?`已记录 ${completed} / ${total} 项`:'今天暂无安排'}</span></div>${alarmBanner()}<section aria-labelledby="plan-heading"><div class="section-title plan-title"><h2 id="plan-heading">一天的用药安排</h2><button class="text-button" id="home-schedule-settings">设置安排${icon('chevron')}</button></div>${unset?`<button class="setup-notice" id="setup-schedules"><span>${unset} 种药品未设置频率<small>选择自己的周期、时间与疗程</small></span>${icon('chevron')}</button>`:''}<p class="home-alarm-help">时段开关控制提醒；独立时间显示在药品下方</p><div class="day-plan">${plan.map(group=>`<section class="period-group" aria-labelledby="period-${group.slot}"><header class="period-header"><span class="period-icon">${icon(group.slot)}</span><h2 id="period-${group.slot}">${slotNames[group.slot]}</h2><span class="period-progress" aria-label="${group.medications.length?`已记录 ${group.medications.filter(i=>i.record).length} 项，共 ${group.medications.length} 项`:'无安排'}">${group.medications.length?`${group.medications.filter(i=>i.record).length}/${group.medications.length}`:'无安排'}</span>${alarmButton(group.slot)}</header>${group.medications.length?group.medications.slice().sort((a,b)=>(a.medication.schedule.times[group.slot] || alarmSettings[group.slot].time).localeCompare(b.medication.schedule.times[group.slot] || alarmSettings[group.slot].time)).map(item=>planRow(item,group.slot,records)).join(''):'<p class="period-empty">这个时段没有安排药品</p>'}</section>`).join('')}</div><div class="supplement-line"><button class="text-button" id="supplement-button" ${storageBlocked || !data.medications.length?'disabled':''}>${icon('clock')}<span>补记用药</span></button></div></section><section aria-labelledby="timeline-heading"><div class="section-title"><h2 id="timeline-heading">今日时间线</h2>${records.length?`<span>${records.length} 条</span>`:''}</div>${records.length?timeline(records):`<div class="empty-state">${icon('clock')}<p>今天还没有记录</p><small>用药后，轻点「记录」</small></div>`}</section>`;
+    return `<section class="page-heading"><h1>今天</h1><p>${dateLabel(new Date())}</p></section><div class="summary"><strong>今日安排</strong><span>${total?`已记录 ${completed} / ${total} 项${skipped?` · 跳过 ${skipped} 项`:""}`:'今天暂无安排'}</span></div>${alarmBanner()}${backupBanner()}<section aria-labelledby="plan-heading"><div class="section-title plan-title"><h2 id="plan-heading">一天的用药安排</h2><button class="text-button" id="home-schedule-settings">设置安排${icon('chevron')}</button></div>${unset?`<button class="setup-notice" id="setup-schedules"><span>${unset} 种药品未设置频率<small>选择自己的周期、时间与疗程</small></span>${icon('chevron')}</button>`:''}<p class="home-alarm-help">时段开关控制提醒；独立时间显示在药品下方</p><div class="day-plan">${plan.map(group=>`<section class="period-group" aria-labelledby="period-${group.slot}"><header class="period-header"><span class="period-icon">${icon(group.slot)}</span><h2 id="period-${group.slot}">${slotNames[group.slot]}</h2><span class="period-progress" aria-label="${group.medications.length?`已记录 ${group.medications.filter(i=>i.record).length} 项，共 ${group.medications.length} 项`:'无安排'}">${group.medications.length?`${group.medications.filter(i=>i.record).length}/${group.medications.length}`:'无安排'}</span>${alarmButton(group.slot)}</header>${group.medications.length?group.medications.slice().sort((a,b)=>(a.medication.schedule.times[group.slot] || alarmSettings[group.slot].time).localeCompare(b.medication.schedule.times[group.slot] || alarmSettings[group.slot].time)).map(item=>planRow(item,group.slot,records)).join(''):'<p class="period-empty">这个时段没有安排药品</p>'}</section>`).join('')}</div><div class="supplement-line"><button class="text-button" id="supplement-button" ${storageBlocked || !data.medications.length?'disabled':''}>${icon('clock')}<span>补记用药</span></button></div></section><section aria-labelledby="timeline-heading"><div class="section-title"><h2 id="timeline-heading">今日时间线</h2>${records.length?`<span>${records.length} 条</span>`:''}</div>${records.length?timeline(records):`<div class="empty-state">${icon('clock')}<p>今天还没有记录</p><small>用药后，轻点「记录」</small></div>`}${skipTimeline(data.skips.filter(r=>r.day===S.localDay(new Date())))}</section>`;
   }
   function renderStats() {
     const stats = S.getMedicationStats(data).map((item, order) => ({...item, order})).sort((a, b) => b.count - a.count || a.order - b.order);
     const shown = statsExpanded ? stats : stats.slice(0, 4);
-    return `<section class="med-stats" aria-labelledby="stats-heading"><header><h2 id="stats-heading">累计用药次数</h2><span>共 <strong>${data.records.length}</strong> 次</span></header><p class="stats-helper">每条记录计 1 次，累计次数不受下方日期筛选影响</p><div class="stats-list">${shown.map(item => `<button class="stat-row ${filterMed === item.medicationId ? 'is-selected' : ''}" data-stat-med="${escape(item.medicationId)}" aria-label="查看${escape(medicineLabel(item))}的记录，累计${item.count}次"><span class="stat-name">${escape(medicineLabel(item))}<small>${item.lastTakenAt ? `最近 · ${fullDate(item.lastTakenAt)} ${time(item.lastTakenAt)}` : '还没有记录'}</small></span><span class="stat-count"><strong>${item.count}</strong><small>次</small></span>${icon('chevron')}</button>`).join('')}</div>${stats.length > 4 ? `<button class="expand-stats" id="expand-stats" aria-expanded="${statsExpanded}">${statsExpanded ? '收起' : `查看全部 ${stats.length} 种药品`}</button>` : ''}</section>`;
+    return `<section class="med-stats" aria-labelledby="stats-heading"><header><h2 id="stats-heading">累计用药次数</h2><span>共 <strong>${data.records.length}</strong> 次</span></header><p class="stats-helper">每条记录计 1 次，累计次数不受下方日期筛选影响</p><div class="stats-list">${shown.map(item => `<button class="stat-row ${filterMed === item.medicationId ? 'is-selected' : ''}" data-stat-med="${escape(item.medicationId)}" aria-label="查看${escape(medicineLabel(item))}的记录，累计${item.count}次"><span class="stat-name">${escape(medicineLabel(item))}<small>${item.lastTakenAt ? `最近 · ${fullDate(item.lastTakenAt)} ${time(item.lastTakenAt)} · ${item.lastDose?escape(S.getDoseLabel(item.lastDose)):'用量未填写'}` : '还没有记录'}</small></span><span class="stat-count"><strong>${item.count}</strong><small>次</small></span>${icon('chevron')}</button>`).join('')}</div>${stats.length > 4 ? `<button class="expand-stats" id="expand-stats" aria-expanded="${statsExpanded}">${statsExpanded ? '收起' : `查看全部 ${stats.length} 种药品`}</button>` : ''}</section>`;
   }
   function renderHistory() {
-    let records = sortRecords(data.records).filter(r => (!filterMed || r.medicationId === filterMed) && (!filterDate || S.localDay(new Date(r.takenAt)) === filterDate));
-    const groups = new Map();
-    for (const record of records) {
-      const key = S.localDay(new Date(record.takenAt));
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(record);
-    }
-    return `<section class="page-heading"><h1>记录</h1><p>每一次用药，都有迹可循</p></section>${renderStats()}
-      <div class="section-title history-detail-title"><h2>用药明细</h2><button class="text-button" id="history-supplement" ${!data.medications.length || storageBlocked ? 'disabled' : ''}>补记用药</button></div>
-      <div class="history-filters"><label><span class="filter-label">药品</span><select id="filter-med" aria-label="筛选药品"><option value="">全部药品</option>${data.medications.map(m => `<option value="${escape(m.id)}" ${filterMed === m.id ? 'selected' : ''}>${escape(medicineLabel(m))}${m.status === 'archived' ? '（已归档）' : ''}</option>`).join('')}</select></label><label><span class="filter-label">日期</span><input type="date" id="filter-date" aria-label="筛选日期" value="${escape(filterDate)}" max="${S.localDay(new Date())}"></label></div>
-      <div class="filter-footer"><span>${filterMed || filterDate ? '筛选结果' : '全部记录'} · ${records.length} 次</span>${filterMed || filterDate ? '<button id="clear-filters">重置筛选</button>' : '<span>按时间排列</span>'}</div>
-      ${groups.size ? [...groups].map(([day, items]) => `<section class="history-day"><h2>${fullDate(items[0].takenAt)}${day === S.localDay(new Date()) ? ' · 今天' : ''}<span>${items.length} 条</span></h2>${timeline(items)}</section>`).join('') : `<div class="empty-state history-empty">${icon('clock')}<p>${data.records.length ? '没有符合条件的记录' : '还没有用药记录'}</p><small>${data.records.length ? '换个日期或药品试试' : '在首页记录一次，就会出现在这里'}</small></div>`}`;
+    const records=sortRecords(data.records).filter(r=>(!filterMed || r.medicationId===filterMed) && (!filterDate || S.localDay(r.takenAt)===filterDate));
+    const skips=data.skips.filter(r=>(!filterMed || r.medicationId===filterMed) && (!filterDate || r.day===filterDate));
+    const days=[...new Set(records.map(r=>S.localDay(r.takenAt)).concat(skips.map(r=>r.day)))].sort().reverse();
+    return `<section class="page-heading"><h1>记录</h1><p>每一次用药，都有迹可循</p></section>${renderStats()}${weeklyOverview()}<div class="section-title history-detail-title"><h2>用药与跳过明细</h2><button class="text-button" id="history-supplement" ${!data.medications.length || storageBlocked?'disabled':''}>补记用药</button></div><div class="history-filters"><label><span class="filter-label">药品</span><select id="filter-med" aria-label="筛选药品"><option value="">全部药品</option>${data.medications.map(m=>`<option value="${escape(m.id)}" ${filterMed===m.id?'selected':''}>${escape(medicineLabel(m))}${m.status==='archived'?'（已归档）':''}</option>`).join('')}</select></label><label><span class="filter-label">日期</span><input type="date" id="filter-date" aria-label="筛选日期" value="${escape(filterDate)}" max="${S.localDay(new Date())}"></label></div><div class="filter-footer"><span>用药 ${records.length} 次 · 跳过 ${skips.length} 次</span>${filterMed || filterDate?'<button id="clear-filters">重置筛选</button>':'<span>按日期排列</span>'}</div>${days.length?days.map(day=>`<section class="history-day"><h2>${day}${day===S.localDay(new Date())?' · 今天':''}</h2>${timeline(records.filter(r=>S.localDay(r.takenAt)===day))}${skipTimeline(skips.filter(r=>r.day===day))}</section>`).join(''):'<div class="empty-state history-empty"><p>暂无符合条件的记录</p><small>没有记录不代表漏服，可按实际情况补记。</small></div>'}`;
   }
   function medicationResults() {
     if (medView!=='catalog') {
       const archived=medView==='archived', meds=data.medications.filter(m=>(m.status==='archived')===archived && (C.matchesMedication(m,medSearch) || medicineLabel(m).toLowerCase().includes(medSearch.toLowerCase())));
-      return `<div class="med-results-heading"><span role="status">${medSearch?'找到':archived?'已归档':'已添加'} ${meds.length} 种药品</span>${archived?'':'<button id="add-med" class="text-button">手动添加</button>'}</div>${meds.length?`<div class="my-med-list">${meds.map(m=>`<article class="my-med-card"><div class="my-med-heading"><span class="med-symbol">${icon(m.icon)}</span><div><h2>${escape(m.name)}</h2>${m.strength || m.form?`<p class="med-strength">${escape([m.strength,m.form].filter(Boolean).join(' · '))}</p>`:''}<p>${escape(S.getScheduleLabel(m))}</p>${m.schedule.endDate && m.schedule.endDate<S.localDay(new Date())?'<p class="med-state-label">疗程已结束，不再提醒</p>':''}<p class="my-med-dose">${m.dose?`每次 ${escape(S.getDoseLabel(m.dose))}`:'每次用量未设置'}</p></div></div><div class="my-med-actions"><button data-schedule="${escape(m.id)}" aria-label="设置${escape(m.name)}服药频率">设置安排</button><button data-dose="${escape(m.id)}" aria-label="设置${escape(m.name)}每次用量">设置用量</button><button data-rename="${escape(m.id)}" aria-label="查看${escape(m.name)}药品信息">药品信息</button></div></article>`).join('')}</div>`:`<div class="empty-state med-empty">${icon(archived?'clock':'search')}<p>${archived?'还没有归档药品':medSearch?'没有找到这款药品':'还没有添加药品'}</p><small>${archived?'归档后停止提醒，历史记录仍可查看':'搜索药品库或手动添加自己的药品'}</small>${archived?'':'<button id="search-catalog" class="secondary-button">去药品库搜索</button>'}</div>`}`;
+      return `<div class="med-results-heading"><span role="status">${medSearch?'找到':archived?'已归档':'已添加'} ${meds.length} 种药品</span>${archived?'':'<button id="add-med" class="text-button">手动添加</button>'}</div>${meds.length?`<div class="my-med-list">${meds.map(m=>`<article class="my-med-card"><div class="my-med-heading"><span class="med-symbol">${icon(m.icon)}</span><div><h2>${escape(m.name)}</h2>${m.strength || m.form?`<p class="med-strength">${escape([m.strength,m.form].filter(Boolean).join(' · '))}</p>`:''}<p>${escape(S.getScheduleLabel(m))}</p>${m.schedule.endDate && m.schedule.endDate<S.localDay(new Date())?'<p class="med-state-label">疗程已结束，不再提醒</p>':''}<p class="my-med-dose">${m.dose?`每次 ${escape(S.getDoseLabel(m.dose))}`:'每次用量未设置'}</p><p class="last-use">${escape(lastUseText(m.id))}</p></div></div><div class="my-med-actions"><button data-schedule="${escape(m.id)}" aria-label="设置${escape(m.name)}服药频率">设置安排</button><button data-dose="${escape(m.id)}" aria-label="设置${escape(m.name)}每次用量">设置用量</button><button data-rename="${escape(m.id)}" aria-label="查看${escape(m.name)}药品信息">药品信息</button></div></article>`).join('')}</div>`:`<div class="empty-state med-empty">${icon(archived?'clock':'search')}<p>${archived?'还没有归档药品':medSearch?'没有找到这款药品':'还没有添加药品'}</p><small>${archived?'归档后停止提醒，历史记录仍可查看':'搜索药品库或手动添加自己的药品'}</small>${archived?'':'<button id="search-catalog" class="secondary-button">去药品库搜索</button>'}</div>`}`;
     }
     const items=C.search(medSearch,medCategory);
     return `<div class="med-results-heading"><span role="status">${medSearch || medCategory?'找到':'共'} ${items.length} 种药品</span><button id="add-med" class="text-button">手动添加</button></div>${items.length?`<div class="catalog-list">${items.map(item=>{
@@ -234,13 +234,15 @@
     });
   }
   function switchTab(next) {
-    tab = next; render(); window.scrollTo({top:0,behavior:'instant'});
+    tab = next; render(); window.scrollTo({top:0,behavior:'instant'}); $('#main').focus({preventScroll:true});
   }
   function closeModal() {
     closeMedicationTime(false);
     if (alarmPicker) { alarmPicker.destroy(); alarmPicker = null; }
     $('#dialog-root').innerHTML = ''; modal = null; document.body.style.overflow = '';
+    $('.app-shell').inert=false; $('.app-shell').removeAttribute('aria-hidden');
     if ((previousFocus && previousFocus.isConnected)) previousFocus.focus({preventScroll:true});
+    else $('#main').focus({preventScroll:true});
   }
   function sheet(title, body, context = {}) {
     closeMedicationTime(false);
@@ -250,6 +252,7 @@
     modal = context;
     $('#dialog-root').innerHTML = `<div class="modal-overlay"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1"><header class="sheet-header"><h2 id="sheet-title">${escape(title)}</h2><button class="icon-button close-button" data-close aria-label="关闭">${icon('close')}</button></header>${body}</section></div>`;
     document.body.style.overflow = 'hidden';
+    $('.sheet').focus({preventScroll:true}); $('.app-shell').inert=true; $('.app-shell').setAttribute('aria-hidden','true');
     requestAnimationFrame(() => { const panel = $('.sheet'); if (panel) panel.focus({preventScroll:true}); });
   }
   function confirm(title, text, action, label = '确认', danger = false) {
@@ -374,11 +377,7 @@
     if (current.trigger.isConnected) current.trigger.focus({preventScroll:true});
   }
   function settings() {
-    sheet('设置', `<div class="setting-group"><button class="setting-row" id="manage-meds">${icon('pill')}<span>药品管理<small>添加药品、修改信息、暂停与归档</small></span>${icon('chevron')}</button></div><div class="setting-group"><button class="setting-row" id="export-data">${icon('download')}<span>导出备份<small>保存全部药品与用药记录</small></span>${icon('chevron')}</button><button class="setting-row" id="import-data">${icon('upload')}<span>导入备份<small>合并记录，保留已有数据</small></span>${icon('chevron')}</button></div><p class="privacy-note">数据仅保存在这台设备上，无需登录。卸载应用或清理应用数据会移除记录，建议定期导出备份。备份文件含用药记录，请妥善保存。</p><p class="version-note">药记 1.7.1 · 记录每一次用药</p>`, {type:'settings'});
-    $('.setting-group').insertAdjacentHTML('afterbegin', `<button class="setting-row" id="schedule-settings">${icon('calendar')}<span>用药安排<small>周期、独立时间与疗程</small></span>${icon('chevron')}</button>`);
-    $('.setting-group').insertAdjacentHTML('afterbegin', `<button class="setting-row" id="alarm-settings">${icon('alarm')}<span>用药提醒<small>时段开关、系统授权与锁屏试响</small></span>${icon('chevron')}</button>`);
-    $('.privacy-note').insertAdjacentHTML('beforebegin', `<div class="setting-group"><button class="setting-row" id="sponsor-developer">${icon('heart')}<span>赞助开发者<small>支持药记的开发与维护</small></span>${icon('chevron')}</button></div>`);
-    $('#sponsor-developer').insertAdjacentHTML('afterend', `<button class="setting-row" id="disclaimer-button">${icon('info')}<span>免责声明<small>了解应用用途、提醒与数据限制</small></span>${icon('chevron')}</button>`);
+    sheet('设置', `<div class="setting-group"><button class="setting-row" id="alarm-settings">${icon('alarm')}<span>用药提醒<small>时段开关、系统授权与锁屏试响</small></span>${icon('chevron')}</button><button class="setting-row" id="schedule-settings">${icon('calendar')}<span>用药安排<small>周期、独立时间与疗程</small></span>${icon('chevron')}</button><button class="setting-row" id="manage-meds">${icon('pill')}<span>药品管理<small>添加药品、暂停与归档</small></span>${icon('chevron')}</button></div><div class="setting-group"><button class="setting-row" id="backup-settings">${icon('download')}<span>备份与恢复<small>${escape(backupStatusText())}</small></span>${icon('chevron')}</button><button class="setting-row" id="appearance-settings">${icon('settings')}<span>字体与显示<small>跟随系统字号 · ${preferences.largeText?'大字模式已开':'可开启大字模式'}</small></span>${icon('chevron')}</button></div><div class="setting-group"><button class="setting-row" id="about-app">${icon('info')}<span>关于药记<small>更新说明、反馈、隐私政策</small></span>${icon('chevron')}</button><button class="setting-row" id="sponsor-developer">${icon('heart')}<span>赞助开发者</span>${icon('chevron')}</button></div><p class="privacy-note">数据保存在这台设备上。卸载或清除数据前，请先保存备份。</p><p class="version-note">药记 1.8.0 · 记录每一次用药</p>`,{type:'settings'});
   }
   function sponsorDeveloper() {
     sheet('赞助开发者', `<div class="sponsor-intro"><span class="sponsor-icon">${icon('heart')}</span><h3>谢谢你支持药记</h3><p>如果药记帮到了你，欢迎支持后续的开发、维护与改进。</p></div><div class="sponsor-pending"><strong>赞助方式暂未开放</strong><p>收款方式确定后，会在这里提供赞助入口。</p></div><button type="button" id="back-to-settings" class="secondary-button">返回设置</button>`, {type:'sponsor'});
@@ -394,49 +393,159 @@
     sheet(med?'药品信息':'添加自己的药品', `${guided?setupSteps(1):''}<form id="med-form"><label class="form-field"><span>药品名称</span><input class="field-control" name="name" maxlength="60" required autocomplete="off" placeholder="填写实际使用的药品名称" value="${escape(med?med.name:entry?entry.name:'')}"></label><label class="form-field"><span>规格 <small>选填</small></span><input class="field-control" name="strength" maxlength="80" placeholder="如每片 10 mg，请核对包装" value="${escape(med?med.strength:'')}"></label><label class="form-field"><span>剂型 <small>选填</small></span><input class="field-control" name="form" maxlength="80" placeholder="如普通片、缓释片、口服液" value="${escape(med?med.form:'')}"></label>${guided?doseFields(null,'默认每次用量'):''}<p class="form-helper">按医嘱和实际产品填写。规格与每次用量分别记录，应用不推荐剂量。</p><p class="form-error" id="form-error" role="alert" hidden></p><button class="primary-button" type="submit">${guided?'保存并设置用药安排':'保存药品信息'}</button></form>${med?`<section class="medicine-lifecycle"><h3>安排与归档</h3><p>${med.status==='archived'?'已归档，提醒已停止，历史记录保留。':med.status==='paused'?'安排已暂停，保留原频率和历史记录。':'暂停或归档仅调整本应用的安排与提醒。'}</p>${med.status==='archived'?`<button class="secondary-button" data-med-status="paused" data-med-id="${escape(id)}">移回药品列表，保持暂停</button>`:`<button class="secondary-button" data-med-status="${med.status==='paused'?'active':'paused'}" data-med-id="${escape(id)}">${med.status==='paused'?'恢复安排':'暂停安排'}</button><button class="text-button lifecycle-archive" data-med-status="archived" data-med-id="${escape(id)}">归档药品</button>`}</section>`:''}`, {type:'med',id,guided,entry});
     if (guided) updateDoseFields($('#med-form'));
   }
-  function saveFile(text, name) {
-    if (window.MedtimeAndroid && typeof window.MedtimeAndroid.saveFile === 'function') {
-      window.MedtimeAndroid.saveFile(text, name, 'application/json');
-      return;
+  function saveFile(text, name, kind=null) {
+    if (exportPending) throw new Error('请先完成正在保存的文件');
+    if (window.MedtimeAndroid && typeof window.MedtimeAndroid.saveFile==='function') {
+      exportPending=true;
+      try {
+        if (kind && window.MedtimeAndroid.exportBackup) window.MedtimeAndroid.exportBackup(text,name,kind);
+        else window.MedtimeAndroid.saveFile(text,name,'application/json');
+      } catch(error) { exportPending=false; throw error; }
+      closeModal(); return;
     }
-    const blob = new Blob([text], {type:'application/json;charset=utf-8'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = name;
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-    toast('备份已生成，请保存下载文件');
+    const url=URL.createObjectURL(new Blob([text],{type:'application/json;charset=utf-8'}));
+    const a=document.createElement('a'); a.href=url; a.download=name; document.body.append(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),10000);
+    if (!kind) { toast('文件已生成，请保存下载文件'); return; }
+    sheet('确认备份已保存',`<p class="confirm-copy">备份文件已生成。浏览器无法确认文件是否保存成功，请在下载列表中检查后再确认。</p><p class="form-helper">${escape(name)}</p><p class="form-error" id="form-error" role="alert" hidden></p><button class="primary-button" id="confirm-backup-saved">已确认文件保存成功</button><button class="secondary-button" data-close>尚未保存，先关闭</button>`,{type:'confirm-backup',kind});
   }
   async function importFile(file) {
     if (!file) return;
-    if (file.size > 32 * 1024 * 1024) { toast('备份文件过大，请选择小于 32 MB 的 JSON 文件'); return; }
+    if (file.size>32*1024*1024) { toast('备份文件过大，请选择小于 32 MB 的 JSON 文件'); return; }
     try {
-      const text = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error('文件读取失败，请重新选择'));
-        reader.readAsText(file, 'UTF-8');
-      });
-      const next = S.importData(text, data);
-      const added = next.records.length - data.records.length;
-      const meds = next.medications.length - data.medications.length;
-      const plans = next.medications.filter(m => {
-        const current = data.medications.find(old => old.id === m.id);
-        return current && current.schedule.mode === 'none' && m.schedule.mode !== 'none';
-      }).length;
-      const doses = next.medications.filter(m => {
-        const current = data.medications.find(old => old.id === m.id);
-        return current && !current.dose && m.dose;
-      }).length;
-      const details = next.medications.filter(m => {
-        const current = data.medications.find(old => old.id === m.id);
-        return current && (current.strength !== m.strength || current.form !== m.form);
-      }).length;
-      if (!added && !meds && !plans && !doses && !details) { toast('备份中的数据已存在，无需重复导入'); return; }
-      confirm('导入备份', `将添加 ${added} 条记录和 ${meds} 种药品${plans ? `，恢复 ${plans} 种药品的服药频率` : ''}${doses ? `，恢复 ${doses} 种药品的每次用量` : ''}${details ? `，补全 ${details} 种药品的规格剂型` : ''}。本机已有记录、已设置的信息及暂停/归档状态会保留。`, () => {
-        try { commit(S.importData(text, data), '备份已合并', false); closeModal(); }
-        catch (error) { showError(error); }
-      }, '确认导入');
-    } catch (error) { toast(`无法导入：${error.message}`); }
+      const text=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('文件读取失败'));reader.readAsText(file,'UTF-8');});
+      if (B.isEncrypted(text)) decryptForm(text); else previewImport(text);
+    } catch(error) { toast(`无法导入：${error.message}`,null,5000); }
+  }
+
+  function applyAppearance() {
+    let scale=1;
+    try { if ((window.MedtimeAndroid && window.MedtimeAndroid.getTextScale)) scale=Number(window.MedtimeAndroid.getTextScale()); } catch (_) {}
+    if (!Number.isFinite(scale) || scale<0.5 || scale>5) scale=1;
+    const effective=scale*(preferences.largeText?1.25:1);
+    document.documentElement.style.fontSize=(16*effective)+'px';
+    document.documentElement.classList.toggle('reading-large',effective>=1.3);
+    document.documentElement.classList.toggle('large-text',preferences.largeText);
+    window.dispatchEvent(new Event('medtime-layout-changed'));
+  }
+  function savePreferences(changes) {
+    preferences=P.save({...preferences,...changes}); preferenceError='';
+  }
+  function rememberChange() {
+    try { savePreferences({lastChangeAt:new Date().toISOString()}); }
+    catch (_) { preferenceError='记录已保存，备份状态暂时无法更新。'; }
+  }
+  function markBackup(kind, at, method) {
+    if (!['plain','encrypted'].includes(kind) || !Number.isFinite(at) || at<=0) return;
+    savePreferences({lastBackupAt:new Date(at).toISOString(),lastBackupKind:kind,lastBackupMethod:method});
+  }
+  function syncBackupStatus() {
+    try {
+      if (!(window.MedtimeAndroid && window.MedtimeAndroid.getBackupStatus)) return;
+      const status=JSON.parse(window.MedtimeAndroid.getBackupStatus());
+      if (status.savedAt>(Date.parse(preferences.lastBackupAt)||0)) markBackup(status.kind,status.savedAt,'android');
+    } catch (_) { preferenceError='备份状态暂时无法读取，请检查保存的文件。'; }
+  }
+  function backupStatusText() {
+    if (!preferences.lastBackupAt) return '尚无成功备份记录';
+    return `${fullDate(preferences.lastBackupAt)} ${time(preferences.lastBackupAt)} · ${preferences.lastBackupKind==='encrypted'?'加密':'普通'}备份${preferences.lastBackupMethod==='confirmed'?'（你已确认保存）':''}`;
+  }
+  function backupBanner() {
+    if (!P.due(preferences,Boolean(data.medications.length || data.records.length || data.skips.length))) return '';
+    return `<div class="backup-notice"><span>${preferences.lastBackupAt?'该备份用药记录了':'给用药记录留一份备份'}<small>${preferences.lastBackupAt?'距离上次备份已超过 '+preferences.backupDays+' 天':'记录只存在这台设备上'}</small></span><button id="home-backup">去备份</button></div>`;
+  }
+  function backupSettings() {
+    sheet('备份与恢复', `<section class="backup-status"><h3>上次成功备份</h3><p>${escape(backupStatusText())}</p>${preferences.lastChangeAt && preferences.lastBackupAt && preferences.lastChangeAt>preferences.lastBackupAt?'<p>备份后有记录或设置变更，建议再保存一份。</p>':''}${preferenceError?`<p role="alert">${escape(preferenceError)}</p>`:''}</section><div class="setting-group"><button class="setting-row" id="export-data">${icon('download')}<span>导出备份<small>可选择普通文件或密码加密</small></span>${icon('chevron')}</button><button class="setting-row" id="import-data">${icon('upload')}<span>从备份恢复<small>预览合并内容，再确认导入</small></span>${icon('chevron')}</button><button class="setting-row" id="restore-guide">${icon('info')}<span>换机恢复指南</span>${icon('chevron')}</button></div><label class="form-field"><span>备份提醒</span><select id="backup-days" class="field-control">${[[7,'每 7 天'],[14,'每 14 天'],[30,'每 30 天'],[0,'关闭提醒']].map(([value,label])=>`<option value="${value}" ${preferences.backupDays===value?'selected':''}>${label}</option>`).join('')}</select></label><p class="form-helper">到期后在打开应用时提醒，不会自动生成备份或后台响铃。备份含药品、用量、安排、用药与跳过记录；系统授权和时段开关需在新手机上重新设置。</p><p class="form-error" id="form-error" role="alert" hidden></p><button class="secondary-button" id="back-to-settings">返回设置</button>`,{type:'backup'});
+  }
+  function exportForm() {
+    if (exportPending) { toast('请先完成或取消正在保存的文件'); return; }
+    if (storageBlocked) { saveFile(localStorage.getItem(S.STORAGE_KEY)||'',`药记原始数据-${S.localDay(new Date())}.json`); return; }
+    sheet('导出备份', `<form id="backup-form"><label class="form-field"><span>备份方式</span><select class="field-control" name="backupKind"><option value="plain">普通 JSON 备份</option><option value="encrypted">密码加密备份</option></select></label><div id="backup-passwords" hidden><label class="form-field"><span>设置备份密码</span><input type="password" class="field-control" name="password" minlength="10" maxlength="128" autocomplete="new-password" disabled></label><label class="form-field"><span>再次输入密码</span><input type="password" class="field-control" name="passwordAgain" minlength="10" maxlength="128" autocomplete="new-password" disabled></label><p class="form-helper">使用 10–128 个字符。请另外保存密码，忘记密码无法恢复此文件；应用不会保存密码。加密保护导出文件，本机记录仍由应用存储保存。</p></div><p class="form-helper">普通备份可直接查看内容，请保存到自己控制的位置。加密备份恢复时需输入密码。</p><p class="form-error" id="form-error" role="alert" hidden></p><button class="primary-button" type="submit">生成并保存备份</button></form>`,{type:'export'});
+  }
+  async function exportSubmit(form) {
+    const owner=modal, button=$('[type="submit"]',form), kind=form.elements.backupKind.value;
+    let pass=form.elements.password.value, again=form.elements.passwordAgain.value;
+    if (kind==='encrypted' && pass!==again) { showError(new Error('两次输入的密码不一致')); return; }
+    button.disabled=true; button.textContent='正在生成…';
+    try {
+      let contents=S.exportData(data);
+      if (kind==='encrypted') contents=await B.encrypt(contents,pass);
+      if (modal!==owner) return;
+      form.elements.password.value=''; form.elements.passwordAgain.value='';
+      const name=`药记${kind==='encrypted'?'加密':''}备份-${S.localDay(new Date())}.json`;
+      saveFile(contents,name,kind);
+    } catch(error) { if (modal===owner) showError(error); }
+    finally { pass=''; again=''; if (button.isConnected) { button.disabled=false; button.textContent='生成并保存备份'; } }
+  }
+  function restoreGuide() {
+    sheet('换机恢复指南', `<ol class="guide-list"><li>在旧手机导出最新备份，确认文件已保存。加密备份请另外记住密码。</li><li>用你信任的方式把文件传到新手机，安装药记 1.8.0 或兼容的更新版本。</li><li>在欢迎页或「备份与恢复」选择文件，按需输入密码，核对预览后确认合并。</li><li>核对药品、用量和历史记录，再到「用药提醒」设置时段开关与默认时间，完成系统授权和锁屏试响。</li><li>新手机核对完成前，请保留旧手机数据与原备份。</li></ol><p class="form-helper">导入保留本机已有记录和已设信息。相同药品的同一天同一时段已有用药记录时，以用药记录为准，不再保留对应的跳过状态。</p><button class="primary-button" id="import-data">选择备份文件</button><button class="secondary-button" id="backup-settings">返回备份与恢复</button>`,{type:'restore-guide'});
+  }
+  function decryptForm(text) {
+    sheet('解锁加密备份', `<form id="decrypt-form"><p class="form-helper">密码仅用于本机解密，不会保存或发送。</p><label class="form-field"><span>备份密码</span><input type="password" class="field-control" name="password" minlength="10" maxlength="128" autocomplete="off" required></label><p class="form-error" id="form-error" role="alert" hidden></p><button class="primary-button" type="submit">解锁并预览</button></form>`,{type:'decrypt',encrypted:text});
+  }
+  async function decryptSubmit(form) {
+    const owner=modal, button=$('[type="submit"]',form);
+    let pass=form.elements.password.value;
+    button.disabled=true; button.textContent='正在解锁…';
+    try {
+      const plain=await B.decrypt(owner.encrypted,pass);
+      if (modal!==owner) return;
+      owner.encrypted=null; form.elements.password.value=''; previewImport(plain);
+    } catch(error) { if (modal===owner) showError(error); }
+    finally { pass=''; if (button.isConnected) { button.disabled=false; button.textContent='解锁并预览'; } }
+  }
+  function previewImport(text) {
+    const next=S.importData(text,data);
+    if (JSON.stringify(next)===JSON.stringify(data)) { closeModal(); toast('备份中的数据已存在，无需重复导入'); return; }
+    const added=next.records.length-data.records.length, meds=next.medications.length-data.medications.length;
+    const skips=next.skips.filter(r=>!data.skips.some(old=>old.id===r.id)).length;
+    const cleared=data.skips.filter(r=>!next.skips.some(item=>item.id===r.id)).length;
+    const updated=next.medications.filter(m=>{const old=data.medications.find(item=>item.id===m.id); return old && JSON.stringify(old)!==JSON.stringify(m);}).length;
+    confirm('导入备份', `将添加 ${added} 条用药记录、${skips} 条跳过记录和 ${meds} 种药品，补全 ${updated} 种药品的信息或安排${cleared?`，清除 ${cleared} 条已有实际用药的跳过状态`:''}。保留本机已有记录、已设置的信息及暂停/归档状态。`,()=>{
+      try {
+        commit(S.importData(text,data),'备份已合并',false);
+        sheet('恢复完成',`<p class="confirm-copy">已合并备份。请核对药品、用量和记录，再检查这台设备的提醒设置。</p><p class="form-helper">时段默认时间、开关和系统授权不会从备份恢复，独立时间随药品安排恢复。</p><button class="primary-button" id="alarm-settings">检查用药提醒</button><button class="secondary-button" data-close>完成</button>`,{type:'restored'});
+      } catch(error) { showError(error); }
+    },'确认导入');
+  }
+  function appearanceSettings() {
+    sheet('字体与显示', `<label class="reading-choice"><input type="checkbox" id="large-text" ${preferences.largeText?'checked':''}><span>大字模式<small>在系统字号基础上再放大 25%</small></span></label><p class="form-helper">安卓安装版跟随系统字号；开启大字模式后，设置会保存在这台设备。按钮支持键盘操作，弹窗关闭后会返回原操作位置。</p><div class="reading-preview"><strong>记录每一次用药</strong><p>这里预览当前文字大小。</p><button type="button" class="primary-button" id="back-to-settings">返回设置</button></div><p class="form-error" id="form-error" role="alert" hidden></p>`,{type:'appearance'});
+  }
+  function latestUse(id) {
+    return data.records.reduce((last,r)=>r.medicationId===id && (!last || r.takenAt>last.takenAt)?r:last,null);
+  }
+  function lastUseText(id) {
+    const last=latestUse(id);
+    return last?`上次用药 · ${fullDate(last.takenAt)} ${time(last.takenAt)} · ${last.dose?S.getDoseLabel(last.dose):'用量未填写'}`:'上次用药 · 暂无记录';
+  }
+  function skipForm(id, slot, existing) {
+    const med=data.medications.find(m=>m.id===id); if (!med) return;
+    sheet(existing?'查看跳过记录':'本次跳过', `<p class="schedule-med-name">${escape(existing?existing.medicationName:med.name)} · ${slotNames[slot]}</p><form id="skip-form"><label class="form-field"><span>跳过原因</span><textarea class="field-control" name="reason" maxlength="200" required placeholder="按实际情况填写">${escape((existing && existing.reason) || '')}</textarea></label><p class="form-helper">仅标记 ${escape((existing && existing.day) || S.localDay(new Date()))} 的${slotNames[slot]}安排，不计入用药次数，也不代表建议停药。此时段不再提醒。</p><p class="form-error" id="form-error" role="alert" hidden></p><button type="submit" class="primary-button">${existing?'保存原因':'确认本次跳过'}</button>${existing?'<button type="button" class="danger-button" id="delete-skip">撤销这次跳过</button>':''}</form>`,{type:'skip',id,slot,day:S.localDay(new Date()),skip:existing});
+  }
+  function skipTimeline(skips) {
+    return `<div class="skip-list">${skips.map(r=>`<article class="skip-entry"><div><strong>${escape(r.medicationName)}</strong><p>${slotNames[r.slot]} · 已跳过</p><p>${escape(r.reason)}</p>${r.medicationStrength || r.medicationForm?`<p>${escape([r.medicationStrength,r.medicationForm].filter(Boolean).join(' · '))}</p>`:''}</div><button class="icon-button" data-edit-skip="${escape(r.id)}" aria-label="查看${escape(r.medicationName)}${r.day}${slotNames[r.slot]}的跳过原因">${icon('more')}</button></article>`).join('')}</div>`;
+  }
+  function weeklyOverview() {
+    const days=S.getWeekSummary(data,new Date(),filterMed);
+    return `<section class="week-summary"><h2>近 7 天记录</h2><p>${filterMed?'当前药品':'全部药品'} · 按保存的记录汇总，不推断漏服</p><table><thead><tr><th scope="col">日期</th><th scope="col">用药次数</th><th scope="col">跳过次数</th></tr></thead><tbody>${days.map(day=>`<tr><th scope="row"><button data-week-day="${day.day}" aria-label="查看${day.day}的记录">${day.day.slice(5).replace('-','/')} ${day.day===S.localDay(new Date())?'今天':''}</button></th><td>${day.records}</td><td>${day.skips}</td></tr>`).join('')}</tbody></table></section>`;
+  }
+  function aboutApp() {
+    sheet('关于药记', `<p class="app-version">药记 1.8.0</p><p class="form-helper">离线用药记录与辅助提醒。</p><div class="setting-group"><button class="setting-row" id="release-notes"><span>版本更新说明</span>${icon('chevron')}</button><button class="setting-row" id="feedback"><span>问题反馈</span>${icon('chevron')}</button><button class="setting-row" id="privacy-policy"><span>隐私政策</span>${icon('chevron')}</button><button class="setting-row" id="disclaimer-button"><span>免责声明</span>${icon('chevron')}</button></div><button class="secondary-button" id="back-to-settings">返回设置</button>`,{type:'about'});
+  }
+  function releaseNotes() {
+    sheet('版本更新说明', `<div class="document-copy"><h3>1.8.0 · 2026-09-11</h3><ul><li>显示上次用药时间与用量，新增本次跳过及原因、近 7 天记录概览。</li><li>新增成功备份时间、定期提醒、密码加密备份与换机恢复指南。</li><li>跟随系统字号，新增大字模式，扩大点击区域并改善弹窗焦点。</li><li>新增更新说明、问题反馈和独立隐私政策。</li></ul><h3>1.7.1</h3><p>提醒通知保留停止响铃、打开药记两个按钮。独立时间使用弹出的小时／分钟双列滑动选择器。</p><h3>1.7.0</h3><p>空药品列表与首次引导；新增规格剂型、独立时间、睡前、疗程、暂停归档及锁屏试响。</p></div><button class="primary-button" data-external="updates">在浏览器查看项目与新版</button><button class="secondary-button" id="about-app">返回关于</button>`,{type:'release-notes'});
+  }
+  function feedback() {
+    sheet('问题反馈', `<p class="form-helper">通过 GitHub 提交反馈，需要你在浏览器中登录并发送。反馈可能公开，请勿附上用药备份、密码或身份信息。</p><label class="form-field"><span>可复制以下模板并按需填写</span><textarea class="field-control feedback-template" readonly>药记版本：1.8.0\n手机型号与安卓版本：\n发生问题的操作步骤：\n预期结果：\n实际结果：</textarea></label><button class="primary-button" data-external="feedback">打开 GitHub 反馈页面</button><button class="secondary-button" id="about-app">返回关于</button>`,{type:'feedback'});
+  }
+  function privacyPolicy() {
+    sheet('隐私政策', `<div class="document-copy"><p>适用版本：药记 1.8.0 · 更新日期：2026-09-11</p><h3>维护与联系</h3><p>项目由 GitHub 账号 1841175465li-byte 维护。问题可通过「关于药记 → 问题反馈」联系。</p><h3>在本机处理的数据</h3><p>药名、规格、剂型、用量、安排、用药时间、备注和跳过原因保存在本机。应用也保存提醒配置、试响结果、显示偏好和备份时间。</p><h3>收集与共享</h3><p>应用没有账号、广告或统计 SDK，没有联网权限，不向开发者服务器上传用药数据。原生提醒只读取排程所需信息；通知在锁屏上按系统设置隐藏敏感内容。</p><h3>备份</h3><p>仅在你导出或导入时通过系统文件选择器读写所选文件。普通 JSON 可直接阅读；加密备份使用你设置的密码，密码不保存在应用中，无法找回。系统文件选择器中选择的云盘按对应服务的规则处理文件。</p><h3>权限</h3><p>通知和准时闹钟用于提醒；开机接收用于重新排程；前台播放、唤醒锁和振动用于有限时长响铃。应用不读取联系人、位置、相机或麦克风。</p><h3>保存与删除</h3><p>数据一直保存在本机，直到你删除相关记录、清除应用数据或卸载。归档药品会保留历史。应用关闭系统自动备份；导出的文件需你在保存位置自行删除。</p><h3>外部页面与变更</h3><p>仅在你点开项目或反馈时，使用系统浏览器访问 GitHub，适用其隐私规则。不会自动附加用药记录。本政策随版本更新，可在应用内和项目仓库查看。</p></div><button class="secondary-button" id="about-app">返回关于</button>`,{type:'privacy'});
+  }
+  function openExternal(kind) {
+    const urls={updates:'https://github.com/1841175465li-byte/medtime',feedback:'https://github.com/1841175465li-byte/medtime/issues/new'};
+    if (!urls[kind]) return;
+    if ((window.MedtimeAndroid && window.MedtimeAndroid.openExternal)) window.MedtimeAndroid.openExternal(kind);
+    else window.open(urls[kind],'_blank','noopener,noreferrer');
   }
 
   function medicineLabel(med) {
@@ -519,6 +628,10 @@
       catch (error) { showError(error); }
       return;
     }
+    if (target.dataset.external) { openExternal(target.dataset.external); return; }
+    if (target.dataset.skip) { skipForm(target.dataset.skip,target.dataset.slot); return; }
+    if (target.dataset.editSkip) { const r=data.skips.find(r=>r.id===target.dataset.editSkip); if(r) skipForm(r.medicationId,r.slot,r); return; }
+    if (target.dataset.weekDay) { filterDate=target.dataset.weekDay; render(); $('.history-detail-title').scrollIntoView({block:'start'}); return; }
     if (target.dataset.record) { recordNow(target.dataset.record, target.dataset.slot || null); return; }
     if (target.dataset.edit) { recordForm(data.records.find(r => r.id === target.dataset.edit)); return; }
     if (target.dataset.rename) { medForm(target.dataset.rename); return; }
@@ -535,6 +648,18 @@
       return;
     }
     switch (target.id) {
+      case 'home-backup': case 'backup-settings': backupSettings(); break;
+      case 'restore-guide': restoreGuide(); break;
+      case 'appearance-settings': appearanceSettings(); break;
+      case 'about-app': aboutApp(); break;
+      case 'release-notes': releaseNotes(); break;
+      case 'feedback': feedback(); break;
+      case 'privacy-policy': privacyPolicy(); break;
+      case 'confirm-backup-saved': try { markBackup(modal.kind,Date.now(),'confirmed'); backupSettings(); render(); toast('已记录成功备份时间'); } catch(error) { showError(error); } break;
+      case 'delete-skip': {
+        const skip=modal.skip;
+        confirm('撤销这次跳过？','撤销后，该时段恢复为未记录。只有尚未触发且时间未过的安排才会继续提醒。',()=>{try {commit(S.deleteSkip(data,skip.id),'已撤销跳过');closeModal();}catch(error){showError(error);}},'撤销跳过'); break;
+      }
       case 'settings-button': settings(); break;
       case 'sponsor-developer': sponsorDeveloper(); break;
       case 'disclaimer-button': disclaimer(); break;
@@ -595,7 +720,7 @@
       }
       case 'manage-meds': manageMeds(); break;
       case 'add-med': medForm(); break;
-      case 'export-data': try { saveFile(storageBlocked ? localStorage.getItem(S.STORAGE_KEY) || '' : S.exportData(data), `药记${storageBlocked ? '原始数据' : '备份'}-${S.localDay(new Date())}.json`); } catch (error) { toast(error.message); } break;
+      case 'export-data': try { exportForm(); } catch(error) { showError(error); } break;
       case 'import-data': $('#import-input').value = ''; $('#import-input').click(); break;
       case 'export-raw': try { saveFile(localStorage.getItem(S.STORAGE_KEY) || '', `药记原始数据-${S.localDay(new Date())}.json`); } catch (error) { toast('系统存储不可读取，请检查应用存储状态'); } break;
     }
@@ -604,6 +729,13 @@
     if (event.target.id === 'med-search') { medSearch = event.target.value; refreshMedicationResults(); }
   });
   document.addEventListener('change', event => {
+    if (event.target.name==='backupKind') {
+      const enabled=event.target.value==='encrypted'; $('#backup-passwords').hidden=!enabled;
+      $('#backup-form').querySelectorAll('input[type="password"]').forEach(input=>{input.disabled=!enabled;input.required=enabled; if(!enabled) input.value='';});
+    }
+    if (event.target.id==='backup-days') { try {savePreferences({backupDays:Number(event.target.value)}); render(); toast('备份提醒已保存');} catch(error) {showError(error);} }
+    if (event.target.id==='large-text') { try {savePreferences({largeText:event.target.checked});applyAppearance();} catch(error) {event.target.checked=preferences.largeText;showError(error);} }
+
     if (event.target.name === 'doseUnit') updateDoseFields(event.target.form);
     if (event.target.closest('#record-form') && event.target.name === 'medicationId') {
       const med = data.medications.find(m => m.id === event.target.value);
@@ -617,6 +749,16 @@
     if (event.target.id === 'import-input') importFile((event.target.files && event.target.files[0]));
   });
   document.addEventListener('submit', event => {
+    if (event.target.id==='backup-form') {event.preventDefault();exportSubmit(event.target);return;}
+    if (event.target.id==='decrypt-form') {event.preventDefault();decryptSubmit(event.target);return;}
+    if (event.target.id==='skip-form') {
+      event.preventDefault();
+      try {
+        const context=modal, reason=event.target.elements.reason.value;
+        commit(context.skip?S.updateSkip(data,context.skip.id,reason):S.addSkip(data,{medicationId:context.id,day:context.day,slot:context.slot,reason}),context.skip?'跳过原因已更新':'本次已跳过');closeModal();
+      } catch(error) {showError(error);} return;
+    }
+
     if (!['record-form','med-form','schedule-form','alarm-form','dose-form'].includes(event.target.id)) return;
     event.preventDefault();
     const form = new FormData(event.target);
@@ -684,11 +826,11 @@
     if (event.key === 'Tab') {
       const panel=medTimeDialog ? medTimeDialog.panel : $('.sheet');
       if (!panel) return;
-      const focusable = [...panel.querySelectorAll('button,input,select,textarea,[tabindex="0"]')].filter(el => !el.disabled && !el.hidden && el.tabIndex >= 0 && el.getClientRects().length);
+      const focusable = [...panel.querySelectorAll('a[href],button,input,select,textarea,[tabindex="0"]')].filter(el => !el.disabled && !el.hidden && el.tabIndex >= 0 && el.getClientRects().length);
       const first = focusable[0], last = focusable[focusable.length - 1];
       if (!first) return;
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel)) { event.preventDefault(); first.focus(); }
+      if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement) || document.activeElement === panel)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement) || document.activeElement === panel)) { event.preventDefault(); first.focus(); }
     }
   });
   window.MedtimeNativeBack = () => {
@@ -699,14 +841,21 @@
   };
   window.MedtimeOpenAlarm = () => { closeModal(); switchTab('today'); refreshAlarmStatus(); };
   window.addEventListener('medtime-alarm-status', refreshAlarmStatus);
+  window.addEventListener('medtime-text-scale',applyAppearance);
   window.addEventListener('medtime-export-result', event => {
-    if ((event.detail && event.detail.ok)) toast('备份已保存');
-    else if (!(event.detail && event.detail.cancelled)) toast('备份未能保存，请重试');
+    exportPending=false;
+    const result=event.detail || {};
+    if (result.ok) {
+      try {markBackup(result.kind,Number(result.savedAt),'android'); render(); if(modal && modal.type==='backup') backupSettings(); toast('备份已保存');}
+      catch(error) {toast('文件已保存，备份时间更新失败：'+error.message);}
+    } else if (!result.cancelled) toast('备份未能保存，请重试');
+    else toast('已取消保存，成功备份时间未改变');
   });
   window.addEventListener('storage', event => {
-    if (event.key === S.STORAGE_KEY || event.key === R.STORAGE_KEY || event.key === null) { closeModal(); load(); render(); toast('记录与闹钟已和本地存储同步'); }
+    if (event.key === S.STORAGE_KEY || event.key === R.STORAGE_KEY || event.key === P.KEY || event.key === null) { closeModal(); load(); render(); toast('记录与闹钟已和本地存储同步'); }
   });
   function refreshDay() {
+    syncBackupStatus();
     const day = S.localDay(new Date());
     if (day !== observedDay) { observedDay = day; render(); }
     const dateInput = $('[name="takenAt"]');

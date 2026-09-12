@@ -40,11 +40,12 @@ public final class AlarmScheduler {
         final Map<String,AlarmPlan.Alarm> alarms=new HashMap<>();
         final List<AlarmPlan.Medicine> meds=new ArrayList<>();
         final List<AlarmPlan.Dose> doses=new ArrayList<>();
+        final List<AlarmPlan.Skip> skips=new ArrayList<>();
         Snapshot(String text) throws Exception {
             if (text==null || text.length()>4*1024*1024) throw new IllegalArgumentException("闹钟数据过大");
             JSONObject json=new JSONObject(text);
             int version=json.getInt("version");
-            if (version!=1 && version!=2) throw new IllegalArgumentException("不支持的闹钟数据版本");
+            if (version!=1 && version!=2 && version!=3) throw new IllegalArgumentException("不支持的闹钟数据版本");
             JSONObject alarmJson=json.getJSONObject("alarms");
             int alarmVersion=alarmJson.getInt("version");
             if (alarmVersion!=1 && alarmVersion!=2) throw new IllegalArgumentException("不支持的闹钟设置版本");
@@ -65,7 +66,7 @@ public final class AlarmScheduler {
                 String id=med.getString("id");
                 if (!ids.add(id)) throw new IllegalArgumentException("药品标识重复");
                 Map<String,String> times=new HashMap<>();
-                if (version==2) {
+                if (version>=2) {
                     JSONObject overrides=schedule.getJSONObject("times");
                     Iterator<String> keys=overrides.keys();
                     while (keys.hasNext()) { String key=keys.next(); times.put(key,overrides.getString(key)); }
@@ -79,6 +80,15 @@ public final class AlarmScheduler {
                 JSONObject record=records.getJSONObject(i);
                 if (!ids.contains(record.getString("medicationId"))) throw new IllegalArgumentException("记录药品不存在");
                 doses.add(new AlarmPlan.Dose(record.getString("medicationId"),record.getString("slot"),record.getString("takenAt")));
+            }
+            if (version>=3) {
+                JSONArray skipped=json.getJSONArray("skips");
+                if (skipped.length()>20000) throw new IllegalArgumentException("跳过记录过多");
+                for (int i=0;i<skipped.length();i++) {
+                    JSONObject skip=skipped.getJSONObject(i);
+                    if (!ids.contains(skip.getString("medicationId"))) throw new IllegalArgumentException("跳过记录药品不存在");
+                    skips.add(new AlarmPlan.Skip(skip.getString("medicationId"),skip.getString("slot"),skip.getString("day")));
+                }
             }
         }
     }
@@ -164,7 +174,7 @@ public final class AlarmScheduler {
         if (!prefs(ctx).contains("snapshot")) return;
         try {
             Snapshot snapshot=snapshot(ctx); ZoneId zone=ZoneId.systemDefault();
-            Set<String> done=AlarmPlan.completions(snapshot.doses,zone); Instant now=Instant.now();
+            Set<String> done=AlarmPlan.resolved(snapshot.doses,snapshot.skips,zone); Instant now=Instant.now();
             for (String slot:AlarmPlan.SLOTS) {
                 AlarmPlan.Alarm alarm=snapshot.alarms.get(slot); String delivered=prefs(ctx).getString("delivered."+slot,"");
                 // A late broadcast must not skip a different medicine's later time
@@ -191,7 +201,7 @@ public final class AlarmScheduler {
         try {
             if (!notificationsAllowed(ctx) || !exactAllowed(ctx)) { reschedule(ctx); return false; }
             Snapshot snapshot=snapshot(ctx); ZoneId zone=ZoneId.systemDefault(); long lateness=System.currentTimeMillis()-at;
-            List<String> names=AlarmPlan.pending(slot,snapshot.alarms.get(slot),snapshot.meds,AlarmPlan.completions(snapshot.doses,zone),at,zone);
+            List<String> names=AlarmPlan.pending(slot,snapshot.alarms.get(slot),snapshot.meds,AlarmPlan.resolved(snapshot.doses,snapshot.skips,zone),at,zone);
             boolean due=lateness>=0 && lateness<=60*60*1000 && !names.isEmpty();
             if (due) {
                 String delivered=AlarmPlan.deliveryKey(at,zone);

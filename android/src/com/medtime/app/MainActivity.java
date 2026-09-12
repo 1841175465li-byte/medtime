@@ -5,6 +5,8 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.res.Configuration;
+import org.json.JSONObject;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -46,6 +48,7 @@ public final class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private byte[] pendingExport;
     private boolean restoredFilePicker;
+    private String pendingExportKind;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -53,7 +56,7 @@ public final class MainActivity extends Activity {
         if (state != null && state.getBoolean("medtime-export", false)) {
             File cache = pendingExportFile();
             if (cache.isFile() && cache.length() <= MAX_BACKUP_BYTES) {
-                try { pendingExport = Files.readAllBytes(cache.toPath()); }
+                try { pendingExport = Files.readAllBytes(cache.toPath()); pendingExportKind = state.getString("medtime-export-kind"); }
                 catch (IOException ignored) { clearPendingExport(); }
             } else { clearPendingExport(); }
         } else { clearPendingExport(); }
@@ -88,7 +91,7 @@ public final class MainActivity extends Activity {
         settings.setSupportMultipleWindows(false);
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
         settings.setMediaPlaybackRequiresUserGesture(true);
-        settings.setTextZoom(100);
+        // Root rem sizes follow getTextScale(); do not apply WebView text zoom twice.
         if (Build.VERSION.SDK_INT >= 29) settings.setForceDark(WebSettings.FORCE_DARK_OFF);
         WebView.setWebContentsDebuggingEnabled(false);
         webView.addJavascriptInterface(new LocalFileBridge(), "MedtimeAndroid");
@@ -181,7 +184,30 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public String confirmAlarmTest(boolean heard) { return AlarmScheduler.confirmTest(MainActivity.this,heard).toString(); }
 
         @JavascriptInterface public void requestAlarmAccess(String kind) { runOnUiThread(() -> requestAlarmAccessOnUi(kind)); }
+        @JavascriptInterface public float getTextScale() { return getResources().getConfiguration().fontScale; }
+        @JavascriptInterface public String getBackupStatus() {
+            android.content.SharedPreferences state=getSharedPreferences("medtime_backup",MODE_PRIVATE);
+            JSONObject status=new JSONObject();
+            try { status.put("savedAt",state.getLong("savedAt",0)); status.put("kind",state.getString("kind","")); } catch (Exception ignored) {}
+            return status.toString();
+        }
+        @JavascriptInterface public void openExternal(String destination) {
+            final String url="feedback".equals(destination)?"https://github.com/1841175465li-byte/medtime/issues/new":
+                "updates".equals(destination)?"https://github.com/1841175465li-byte/medtime":null;
+            if (url==null) return;
+            runOnUiThread(() -> {
+                try { startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url))); }
+                catch (ActivityNotFoundException error) { Toast.makeText(MainActivity.this,"没有可用的浏览器",Toast.LENGTH_SHORT).show(); }
+            });
+        }
+        @JavascriptInterface public void exportBackup(String text, String filename, String kind) {
+            if (!"plain".equals(kind) && !"encrypted".equals(kind)) return;
+            saveDocument(text,filename,"application/json",kind);
+        }
         @JavascriptInterface public void saveFile(String text, String filename, String mime) {
+            saveDocument(text,filename,mime,null);
+        }
+        private void saveDocument(String text, String filename, String mime, String kind) {
             if (text == null || text.length() > MAX_BACKUP_BYTES) {
                 runOnUiThread(() -> reportExport(false, false));
                 return;
@@ -200,6 +226,7 @@ public final class MainActivity extends Activity {
                 try (OutputStream cache = new FileOutputStream(pendingExportFile())) {
                     cache.write(contents);
                     pendingExport = contents;
+                    pendingExportKind = kind;
                 } catch (IOException error) {
                     clearPendingExport();
                     reportExport(false, false);
@@ -281,9 +308,13 @@ public final class MainActivity extends Activity {
             try (OutputStream stream = getContentResolver().openOutputStream(data.getData(), "wt")) {
                 if (stream == null) throw new IOException("No output stream");
                 stream.write(pendingExport);
-                reportExport(true, false);
-            } catch (IOException error) { reportExport(false, false); }
-            finally { clearPendingExport(); }
+                stream.flush();
+            } catch (Exception error) { clearPendingExport(); reportExport(false, false); return; }
+            long savedAt=System.currentTimeMillis();
+            String savedKind=pendingExportKind;
+            if (savedKind!=null) getSharedPreferences("medtime_backup",MODE_PRIVATE).edit().putLong("savedAt",savedAt).putString("kind",savedKind).commit();
+            reportExport(true, false, savedKind, savedAt);
+            clearPendingExport();
         }
     }
 
@@ -291,22 +322,32 @@ public final class MainActivity extends Activity {
 
     private void clearPendingExport() {
         pendingExport = null;
+        pendingExportKind = null;
         File temporary = pendingExportFile();
         if (temporary.isFile()) temporary.delete();
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putBoolean("medtime-export", pendingExport != null);
+        state.putString("medtime-export-kind",pendingExportKind);
         state.putBoolean("medtime-file-picker", fileCallback != null || restoredFilePicker);
         super.onSaveInstanceState(state);
     }
 
-    private void reportExport(boolean ok, boolean cancelled) {
+    private void reportExport(boolean ok, boolean cancelled) { reportExport(ok,cancelled,null,0); }
+    private void reportExport(boolean ok, boolean cancelled, String kind, long savedAt) {
         if (webView == null) return;
-        webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('medtime-export-result',{detail:{ok:"
-            + ok + ",cancelled:" + cancelled + "}}))", null);
+        JSONObject detail=new JSONObject();
+        try { detail.put("ok",ok); detail.put("cancelled",cancelled); detail.put("kind",kind==null?JSONObject.NULL:kind); detail.put("savedAt",savedAt); } catch (Exception ignored) {}
+        webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('medtime-export-result',{detail:"+detail.toString()+"}))", null);
         if (ok) Toast.makeText(this, "备份已保存", Toast.LENGTH_SHORT).show();
         else if (!cancelled) Toast.makeText(this, "保存失败，请重新导出", Toast.LENGTH_SHORT).show();
+    }
+    private void reportTextScale() {
+        if (webView!=null) webView.evaluateJavascript("window.dispatchEvent(new Event('medtime-text-scale'))",null);
+    }
+    @Override public void onConfigurationChanged(Configuration config) {
+        super.onConfigurationChanged(config); reportTextScale();
     }
 
     private void handleBack() {
@@ -321,7 +362,7 @@ public final class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         AlarmScheduler.reschedule(this);
-        if (webView != null) { webView.onResume(); reportAlarmStatus(); }
+        if (webView != null) { webView.onResume(); reportAlarmStatus(); reportTextScale(); }
     }
     @Override protected void onDestroy() {
         if (fileCallback != null) { fileCallback.onReceiveValue(null); fileCallback = null; }
