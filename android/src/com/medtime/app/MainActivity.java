@@ -193,7 +193,8 @@ public final class MainActivity extends Activity {
         }
         @JavascriptInterface public void openExternal(String destination) {
             final String url="feedback".equals(destination)?"https://github.com/1841175465li-byte/medtime/issues/new":
-                "updates".equals(destination)?"https://github.com/1841175465li-byte/medtime":null;
+                "updates".equals(destination)?"https://github.com/1841175465li-byte/medtime":
+                "sponsor".equals(destination)?"https://afdian.com/a/666ccb":null;
             if (url==null) return;
             runOnUiThread(() -> {
                 try { startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url))); }

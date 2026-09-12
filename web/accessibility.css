@@ -108,3 +108,7 @@ button,.text-button,.record-button,.assign-button,.recorded-button,.home-alarm-s
 .reading-large .catalog-row>div{flex-basis:100%}
 .reading-large .choice-field legend small{display:block;margin-left:0}
 @media(max-width:360px){.app-shell{padding-left:14px;padding-right:14px}.period-alarm-controls{width:100%;justify-content:space-between}.plan-actions{min-width:80px}.sheet{padding-left:16px;padding-right:16px}.reading-large .med-stats header{display:block}.reading-large .med-stats header>span{display:block;margin-top:7px}}
+
+.sponsor-platform{overflow-wrap:anywhere}
+.sponsor-platform .sponsor-url{font-size:.875rem;color:var(--green);user-select:all;-webkit-user-select:all}
+.sponsor-help{font-size:.8125rem;line-height:1.8;color:var(--muted);margin:12px 2px 20px;overflow-wrap:anywhere}

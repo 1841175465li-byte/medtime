@@ -1,8 +1,8 @@
 # 药记 · Android 工程
 
-当前版本 **1.8.0**（versionCode 10），包名 com.medtime.app。最低 Android 8.0（API 26），目标 Android 15（API 35），无原生 CPU 架构限制。前端来自相邻 web 目录，构建时加入 APK 的 assets/www。
+当前版本 **1.8.1**（versionCode 11），包名 com.medtime.app。最低 Android 8.0（API 26），目标 Android 15（API 35），无原生 CPU 架构限制。前端来自相邻 web 目录，构建时加入 APK 的 assets/www。
 
-本版新增跳过原因与近 7 天概览、成功备份状态和密码加密备份、系统字号与大字模式、公开维护入口。通知继续仅保留停止和打开应用，独立时间继续使用双列滑动弹窗。发布包沿用原签名，可覆盖此前版本并保留私有存储。
+本版在 1.8.0 基础上接入爱发电赞助入口，点击后将固定主页 https://afdian.com/a/666ccb 交给系统浏览器；不获取支付或赞助状态。通知继续仅保留停止和打开应用，独立时间继续使用双列滑动弹窗。发布包沿用原签名，可覆盖此前版本并保留私有存储。
 
 ## 构建
 
@@ -11,7 +11,7 @@
     powershell -NoProfile -ExecutionPolicy Bypass -File .\prepare-toolchain.ps1
     powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
-准备脚本从 Microsoft 和 Google 官方站点下载固定版本的便携 JDK 17、Android Platform 35、Build Tools 35，校验 SHA-256，不改变系统环境变量。默认工具链、中间产物和私有签名位于项目的 work/android-build。构建脚本无需网络，输出 ../medtime-1.8.0.apk 和校验文件。
+准备脚本从 Microsoft 和 Google 官方站点下载固定版本的便携 JDK 17、Android Platform 35、Build Tools 35，校验 SHA-256，不改变系统环境变量。默认工具链、中间产物和私有签名位于项目的 work/android-build。构建脚本无需网络，输出 ../medtime-1.8.1.apk 和校验文件。
 
 目录可通过 -WorkRoot、-ToolchainRoot、-WebRoot、-OutputApk 显式指定。保留 signing 目录内的原密钥及密码文件，它们不包含在公开源码中。另一台电脑新生成的密钥无法覆盖已发布 APK；制作更新还需递增 versionCode。
 
@@ -19,7 +19,7 @@
 
 ## 离线资源、数据与权限
 
-- 无网络、位置、相机或广泛存储权限。WebView 只接受应用资源，拒绝外部资源和导航。openExternal 仅在点击时将固定项目／反馈地址交给系统浏览器，不自动附带用户数据。
+- 无网络、位置、相机或广泛存储权限。WebView 只接受应用资源，拒绝外部资源和导航。openExternal 仅在点击时将固定项目／反馈／爱发电赞助地址交给系统浏览器，不自动附带用户数据。
 - 本地安全源为 https://appassets.androidplatform.net/assets/www/，使用 DOM storage，关闭系统自动备份。卸载或清除数据会删除本地记录。
 - 导入／导出使用 Android 系统文件选择器。选择导出位置期间，内容暂存于应用私有缓存，保存完成或取消后清理。
 - 保留系统栏、刘海、软键盘边距，以及 Android 返回按钮和返回手势处理。
@@ -96,12 +96,14 @@ web/preferences.js 使用 medtime.preferences.v1 保存大字模式、备份提�
 
 本 android 目录：
 
-    javac -encoding UTF-8 -d ../work/alarm-plan-tests src/com/medtime/app/AlarmPlan.java ../tests/java/com/medtime/app/AlarmPlanTest.java ../tests/java/com/medtime/app/AlarmManagementTest.java ../tests/java/com/medtime/app/AlarmSkipTest.java
-    java -cp ../work/alarm-plan-tests com.medtime.app.AlarmPlanTest
-    java -cp ../work/alarm-plan-tests com.medtime.app.AlarmManagementTest
-    java -cp ../work/alarm-plan-tests com.medtime.app.AlarmSkipTest
+    javac -encoding UTF-8 -d ../../../work/alarm-plan-tests src/com/medtime/app/AlarmPlan.java ../tests/java/com/medtime/app/AlarmPlanTest.java ../tests/java/com/medtime/app/AlarmManagementTest.java ../tests/java/com/medtime/app/AlarmSkipTest.java
+    java -cp ../../../work/alarm-plan-tests com.medtime.app.AlarmPlanTest
+    java -cp ../../../work/alarm-plan-tests com.medtime.app.AlarmManagementTest
+    java -cp ../../../work/alarm-plan-tests com.medtime.app.AlarmSkipTest
 
-本版 **70 项 Node 测试、61 项纯 Java 断言、35 组浏览器检查**通过。浏览器含 16 组功能与备份检查、6 组大字与无障碍检查、13 组时间弹窗回归；检查 320／360／432／1280 宽度及 200% 系统字号，部分小屏弹窗额外检查系统字号与大字叠加至 250%。加密检查覆盖 Unicode、大文件、错误密码、密文篡改和危险格式参数；恢复预览、取消／失败保存和重复导入均验证。
+1.8.1 通过 **24 组浏览器检查**：8 组赞助入口检查、16 组功能与备份回归。覆盖 320／360／432／1280 宽度、200% 字号，赞助弹窗额外检查系统字号与大字模式叠加至 250%；验证精确外链、点击前不跳转、返回与焦点、记录不变及隐私说明。爱发电导航在测试中拦截，Android 接口明确模拟，未进行在线支付或真机跳转测试。
+
+药品数据与排程规则代码沿用 1.8.0；该版已通过 70 项 Node 测试、61 项纯 Java 断言和 35 组浏览器检查。1.8.1 重新完成整个 APK 的编译、签名、对齐与所有内嵌网页资源核对。
 
 浏览器 Android 桥接使用显式模拟，只验证参数和界面状态，不证明真实设备触发、声音、振动或后台兼容性。真机步骤见 [使用说明](../使用说明.md)。
 
